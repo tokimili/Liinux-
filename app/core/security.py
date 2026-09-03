@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import hmac
 import ipaddress
+import logging
 import re
 import secrets
 from datetime import datetime, timedelta
@@ -17,6 +18,7 @@ from urllib.parse import unquote_plus
 from flask import request
 from werkzeug.security import check_password_hash, generate_password_hash
 
+log = logging.getLogger(__name__)
 
 # ===================================================== 비밀번호
 
@@ -171,8 +173,11 @@ def detect_threats(
             twice = unquote_plus(decoded)
             if twice != decoded:
                 haystacks.append(twice)
-        except Exception:
-            pass
+        except (UnicodeDecodeError, ValueError):
+            # 디코딩 실패 자체가 비정상 입력이다.
+            # 원본(text)은 이미 haystacks 에 들어있으므로 탐지는 계속되고,
+            # 여기서는 "조작된 인코딩" 신호로 남긴다.
+            log.debug("URL 디코딩 실패 — 조작된 인코딩 가능성: %r", text[:120])
 
     blob = "\n".join(haystacks)
 

@@ -1,0 +1,172 @@
+# ==========================================================================
+# VM Security Lab — 운영 스택 (VM 에서 실행)
+#
+#   [인터넷] → cloudflared(터널) → nginx:8080 → web:8000(gunicorn) → db:3306
+#
+# 네트워크를 두 개로 분리한다:
+#   frontend : nginx ↔ cloudflared          (외부 트래픽 경로)
+#   backend  : nginx ↔ web ↔ db, internal:true  (DB는 외부로 나갈 수 없음)
+#
+# db 를 internal 네트워크에만 두는 이유:
+#   컨테이너가 침해되어도 DB에서 외부로 데이터를 빼내는 경로(egress)가 없다.
+#
+# 사용법:
+#   docker compose up -d --build
+#   docker compose --profile tunnel up -d      # Cloudflare Tunnel 포함
+#   docker compose logs -f web
+# ==========================================================================
+
+services:
+
+  # ------------------------------------------------------------------ DB
+  db:
+    image: mariadb:11.4
+    container_name: vmlab-db
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      # 로컬 파일을 읽어들이는 SQLi 기법(LOAD DATA LOCAL INFILE)을 차단한다
+      - --local-infile=0
+      # 느린 쿼리를 남겨 대시보드 쿼리 성능을 추적한다
+      - --slow-query-log=1
+      - --long-query-time=1
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?MYSQL_ROOT_PASSWORD 를 .env 에 설정하세요}
+      MARIADB_DATABASE: ${DB_NAME:-vmlab}
+      MARIADB_USER: ${DB_USER:-vmlab}
+      MARIADB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD 를 .env 에 설정하세요}
+      # root 의 원격 접속을 막는다 (컨테이너 내부 소켓만 허용)
+      MARIADB_ROOT_HOST: localhost
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - backend
+    # 포트를 호스트에 노출하지 않는다.
+    # DB 관리가 필요하면: docker compose exec db mariadb -uvmlab -p vmlab
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    security_opt:
+      - no-new-privileges:true
+    logging: &default_logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ------------------------------------------------------------------ 앱
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+        BUILD_DATE: ${DEPLOYED_AT:-}
+    image: vmlab-web:${APP_VERSION:-dev}
+    container_name: vmlab-web
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # .env 값을 덮어써 컨테이너 네트워크에 맞춘다
+      DB_HOST: db
+      DB_PORT: "3306"
+      UPLOAD_DIR: /app/uploads
+      GUNICORN_BIND: 0.0.0.0:8000
+    volumes:
+      # 업로드 파일은 컨테이너 재생성과 무관하게 보존된다
+      - uploads:/app/uploads
+    networks:
+      - backend
+    depends_on:
+      db:
+        condition: service_healthy
+    # 포트를 호스트에 노출하지 않는다 — Nginx 를 반드시 거치게 강제한다
+    security_opt:
+      - no-new-privileges:true
+    # 앱은 업로드 디렉터리에만 쓰기가 필요하다.
+    # 나머지 파일시스템을 읽기전용으로 만들면 웹셸이 파일을 심기 어려워진다.
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    logging: *default_logging
+
+  # ------------------------------------------------------------------ Nginx
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: vmlab-nginx
+    restart: unless-stopped
+    ports:
+      # ${BIND_ADDR} 로 노출 범위를 제어한다.
+      #   127.0.0.1 (기본) : 호스트 로컬에서만. cloudflared 가 여기로 붙는다.
+      #   0.0.0.0          : LAN 전체 공개 (호스트 전용 네트워크 실습 시)
+      - "${BIND_ADDR:-127.0.0.1}:${HTTP_PORT:-8080}:8080"
+    volumes:
+      - ./deploy/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/nginx/app.conf:/etc/nginx/conf.d/app.conf:ro
+      - nginx_cache:/var/cache/nginx
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      web:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/nginx-health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    logging: *default_logging
+
+  # ------------------------------------------------------------------ Cloudflare Tunnel
+  # 요구사항 #2 (외부 접속) 담당.
+  # 아웃바운드 연결만 사용하므로 공유기에 포트를 열 필요가 없다.
+  #
+  # profiles 로 분리한 이유: vulnerable 모드 실습 중에 실수로 터널이
+  # 올라가면 취약한 앱이 인터넷에 노출된다. 명시적으로만 켜지게 한다.
+  #   docker compose --profile tunnel up -d
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: vmlab-tunnel
+    restart: unless-stopped
+    profiles: ["tunnel"]
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN 을 .env 에 설정하세요}
+      # 터널이 바라볼 로컬 서비스는 Cloudflare 대시보드에서 지정한다:
+      #   Public hostname → Service: http://nginx:8080
+      TUNNEL_METRICS: 0.0.0.0:2000
+    networks:
+      - frontend
+    depends_on:
+      nginx:
+        condition: service_healthy
+    security_opt:
+      - no-new-privileges:true
+    logging: *default_logging
+
+
+# ==========================================================================
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+    # 외부로 나가는 경로를 차단한다 (DB 데이터 유출 방지)
+    internal: true
+
+volumes:
+  db_data:
+    driver: local
+  uploads:
+    driver: local
+  nginx_cache:
+    driver: local

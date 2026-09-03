@@ -11,12 +11,13 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Iterable, Sequence
 from contextlib import contextmanager
-from typing import Any, Iterable, Sequence
+from typing import Any
 
 import pymysql
-from pymysql.cursors import DictCursor
 from dbutils.pooled_db import PooledDB
+from pymysql.cursors import DictCursor
 
 log = logging.getLogger(__name__)
 
@@ -151,3 +152,37 @@ def healthcheck() -> dict:
         }
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": str(exc)}
+
+
+def record_security_event(
+    severity: str,
+    event_type: str,
+    detail: str,
+    ip: str | None = None,
+    path: str | None = None,
+) -> bool:
+    """
+    보안 이벤트를 기록한다 (관리자 대시보드 "보안 이벤트" 화면의 데이터 원천).
+
+    기록 실패가 요청 처리를 깨뜨려서는 안 되므로 예외를 삼키지만,
+    **반드시 로그로 남긴다**. 예전 코드는 `except Exception: pass` 였는데,
+    그러면 "공격을 탐지했지만 기록에 실패한" 최악의 상황이
+    아무 흔적도 없이 사라진다 — 탐지 체계 자체가 신뢰를 잃는다.
+
+    Returns:
+        기록 성공 여부.
+    """
+    try:
+        insert(
+            "INSERT INTO security_events (severity, event_type, ip, path, detail) "
+            "VALUES (%s,%s,%s,%s,%s)",
+            (severity, event_type[:64], ip, (path or "")[:512] or None, detail[:65535]),
+        )
+        return True
+    except Exception as exc:  # noqa: BLE001
+        # CRITICAL 로 남긴다: 감사 추적이 유실된 상황이다.
+        log.critical(
+            "보안 이벤트 기록 실패 — 감사 추적 유실! type=%s severity=%s ip=%s detail=%s (%s)",
+            event_type, severity, ip, detail[:200], exc,
+        )
+        return False

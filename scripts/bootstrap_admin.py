@@ -19,8 +19,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.config import get_config          # noqa: E402
-from app.core import db                    # noqa: E402
+from app.config import get_config  # noqa: E402
+from app.core import db  # noqa: E402
 from app.core.security import hash_password  # noqa: E402
 
 

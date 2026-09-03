@@ -1,0 +1,49 @@
+# 빌드 컨텍스트에서 제외 — 이미지 크기 축소 + 비밀정보 유출 방지
+
+# 시크릿 (가장 중요)
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+cloudflared/*.json
+
+# git
+.git/
+.gitignore
+.github/
+
+# 파이썬 캐시
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 테스트 (런타임에 불필요)
+tests/
+
+# 로컬 개발 산출물
+.local_uploads/
+uploads/
+logs/
+*.log
+backups/
+*.sql.gz
+
+# 문서 (이미지에 넣을 필요 없음)
+docs/
+README.md
+*.md
+!requirements*.txt
+
+# 에디터
+.vscode/
+.idea/
+.DS_Store

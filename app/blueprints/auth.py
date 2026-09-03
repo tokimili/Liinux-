@@ -19,13 +19,23 @@ import logging
 import re
 
 from flask import (
-    Blueprint, current_app, flash, g, redirect,
-    render_template, request, session, url_for,
+    Blueprint,
+    current_app,
+    flash,
+    g,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
 )
 
 from app.core import db
 from app.core.security import (
-    DUMMY_PASSWORD_HASH, hash_password, minutes_ago, verify_password,
+    DUMMY_PASSWORD_HASH,
+    hash_password,
+    minutes_ago,
+    verify_password,
 )
 
 log = logging.getLogger(__name__)
@@ -154,15 +164,11 @@ def login():
     if locked:
         _record_attempt(username, False, "locked")
         cfg = current_app.config_obj
-        try:
-            db.insert(
-                "INSERT INTO security_events (severity, event_type, ip, path, detail) "
-                "VALUES ('high','brute_force',%s,%s,%s)",
-                (getattr(g, "client_ip", None), "/auth/login",
-                 f"계정 '{username}' 대상 반복 로그인 실패로 잠금 발동"),
-            )
-        except Exception:
-            pass
+        db.record_security_event(
+            "high", "brute_force",
+            f"계정 '{username}' 대상 반복 로그인 실패로 잠금 발동",
+            ip=getattr(g, "client_ip", None), path="/auth/login",
+        )
         flash(
             f"로그인 시도가 너무 많습니다. {cfg.LOGIN_LOCKOUT_MINUTES}분 후 다시 시도하세요.",
             "error",
@@ -172,7 +178,7 @@ def login():
     # ---------------- 취약 경로 ----------------
     if _mode() == "vulnerable":
         # [VULN-01] SQL Injection — 문자열 조립으로 인증 우회 가능
-        #   예: username = admin' -- 
+        #   예: username = admin' --
         sql = (
             "SELECT id, username, role, password_hash, is_active FROM users "
             f"WHERE username = '{username}' LIMIT 1"

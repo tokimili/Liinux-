@@ -23,8 +23,17 @@ from datetime import datetime, timedelta
 from functools import wraps
 
 from flask import (
-    Blueprint, Response, abort, current_app, flash, g,
-    jsonify, redirect, render_template, request, session, url_for,
+    Blueprint,
+    Response,
+    abort,
+    current_app,
+    flash,
+    g,
+    redirect,
+    render_template,
+    request,
+    session,
+    url_for,
 )
 
 from app.core import db
@@ -53,15 +62,11 @@ def admin_required(fn):
                 session.get("username"), session.get("role"),
                 request.path, getattr(g, "client_ip", "?"),
             )
-            try:
-                db.insert(
-                    "INSERT INTO security_events (severity, event_type, ip, path, detail) "
-                    "VALUES ('high','privilege_escalation',%s,%s,%s)",
-                    (getattr(g, "client_ip", None), request.path,
-                     f"비관리자 '{session.get('username')}' 가 관리자 페이지 접근 시도"),
-                )
-            except Exception:
-                pass
+            db.record_security_event(
+                "high", "privilege_escalation",
+                f"비관리자 '{session.get('username')}' 가 관리자 페이지 접근 시도",
+                ip=getattr(g, "client_ip", None), path=request.path,
+            )
             abort(403)
         return fn(*args, **kwargs)
     return wrapper

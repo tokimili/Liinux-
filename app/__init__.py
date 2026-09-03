@@ -8,7 +8,6 @@ SECURITY_MODE 환경변수 하나로 secure(patched) / vulnerable 을 전환한�
 from __future__ import annotations
 
 import logging
-import os
 import sys
 
 from flask import Flask, g, jsonify, render_template, request, session
@@ -16,7 +15,7 @@ from flask import Flask, g, jsonify, render_template, request, session
 from app.config import get_config
 from app.core import db
 from app.core.logging_mw import register_access_logging, writer_stats
-from app.core.security import generate_csrf_token, constant_time_compare
+from app.core.security import constant_time_compare, generate_csrf_token
 
 
 def _setup_logging(debug: bool) -> None:
@@ -55,11 +54,11 @@ def create_app(config=None) -> Flask:
     db.init_db(cfg)
 
     # ---------------- 블루프린트 ----------------
-    from app.blueprints.main import bp as main_bp
-    from app.blueprints.auth import bp as auth_bp
-    from app.blueprints.board import bp as board_bp
     from app.blueprints.admin import bp as admin_bp
     from app.blueprints.api import bp as api_bp
+    from app.blueprints.auth import bp as auth_bp
+    from app.blueprints.board import bp as board_bp
+    from app.blueprints.main import bp as main_bp
 
     app.register_blueprint(main_bp)
     app.register_blueprint(auth_bp, url_prefix="/auth")

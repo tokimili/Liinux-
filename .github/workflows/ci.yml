@@ -1,0 +1,297 @@
+name: CI
+
+# ==========================================================================
+# 배포 게이트.
+#
+# "테스트가 통과했으니 배포한다"가 아니라
+# "테스트를 통과하지 못하면 배포될 수 없다"가 이 파일의 목적이다.
+# deploy.yml 은 이 워크플로의 성공(workflow_run: completed/success)만 트리거로 받는다.
+#
+# 잡 구성:
+#   lint     ruff — 문법/스타일 (가장 빨라서 먼저 실패시켜 피드백 단축)
+#   security bandit + pip-audit — 코드 취약패턴 + 의존성 CVE
+#   test     pytest + MariaDB 서비스 컨테이너 — 실제 DB 를 붙인 통합 테스트
+#   build    Docker 이미지 빌드 검증 — 배포 직전 빌드 실패 사고 방지
+#   gate     위 4개 전부 성공했는지 확인하는 단일 판정 잡
+# ==========================================================================
+
+on:
+  push:
+    branches: [main, develop]
+    paths-ignore:
+      - "docs/**"
+      - "**.md"
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# 같은 브랜치에 연속 push 하면 이전 실행을 취소해 러너 시간을 절약한다
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+
+jobs:
+  # ====================================================================
+  # 1. 정적 문법 / 스타일
+  # ====================================================================
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: ruff 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff==0.6.9
+
+      - name: ruff check
+        run: ruff check . --output-format=github
+
+      - name: ruff format 확인 (경고만, 차단하지 않음)
+        run: |
+          ruff format --check . \
+            || echo "::warning::포맷 불일치가 있습니다 (배포를 막지는 않습니다)"
+
+  # ====================================================================
+  # 2. 보안 스캔
+  # ====================================================================
+  security:
+    name: Security scan (bandit + pip-audit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: 스캐너 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install bandit==1.7.9 pip-audit==2.7.3
+
+      # 의도적 취약 코드(vulnerable 모드)가 있으므로 Low 는 차단하지 않는다.
+      # 대신 Medium 이상이 하나라도 나오면 실패시킨다 —
+      # 이 프로젝트에서 Medium+ 는 "실수로 들어간 취약점"을 의미한다.
+      - name: bandit (Medium 이상 차단)
+        run: |
+          bandit -c pyproject.toml -r app scripts wsgi.py \
+            --severity-level medium \
+            --confidence-level medium \
+            -f screen
+
+      - name: bandit 전체 리포트 (참고용 아티팩트)
+        if: always()
+        run: |
+          bandit -c pyproject.toml -r app scripts wsgi.py \
+            -f json -o bandit-report.json || true
+
+      - name: 의존성 CVE 점검 (pip-audit)
+        run: pip-audit -r requirements.txt --strict
+
+      - name: 리포트 업로드
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandit-report
+          path: bandit-report.json
+          retention-days: 14
+          if-no-files-found: ignore
+
+  # ====================================================================
+  # 3. 통합 테스트 (실제 MariaDB)
+  # ====================================================================
+  test:
+    name: Test (pytest + MariaDB)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # 로컬 개발과 동일한 MariaDB 11.4 를 붙인다.
+    # SQLite 로 대체하지 않는 이유: 이 프로젝트의 SQLi 방어/탐지 테스트는
+    # MariaDB 문법에 의존하므로, DB 를 바꾸면 게이트가 거짓 통과할 수 있다.
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: ci_root_pw
+          MARIADB_DATABASE: vmlab_test
+          MARIADB_USER: vmlab
+          MARIADB_PASSWORD: vmlab_ci_pw
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+
+    env:
+      # 테스트는 항상 secure 를 기준으로 하고,
+      # vulnerable 모드는 vuln_app 픽스처가 개별적으로 만든다.
+      SECURITY_MODE: secure
+      SECRET_KEY: ci-test-secret-key-not-used-in-production
+      DB_HOST: 127.0.0.1
+      DB_PORT: "3306"
+      DB_NAME: vmlab_test
+      DB_USER: vmlab
+      DB_PASSWORD: vmlab_ci_pw
+      DB_POOL_SIZE: "3"
+      UPLOAD_DIR: /tmp/vmlab-test-uploads
+      SESSION_COOKIE_SECURE: "false"
+      LOGIN_MAX_ATTEMPTS: "5"
+      LOGIN_LOCKOUT_MINUTES: "15"
+      TRUSTED_PROXY_COUNT: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: MariaDB 준비 대기
+        run: |
+          for i in $(seq 1 30); do
+            if mysqladmin ping -h 127.0.0.1 -P 3306 \
+                 -u vmlab -pvmlab_ci_pw --silent 2>/dev/null; then
+              echo "MariaDB 준비 완료 (${i}초)"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::MariaDB 가 30초 내에 준비되지 않았습니다"
+          exit 1
+
+      - name: 스키마 마이그레이션
+        run: python3 scripts/migrate.py
+
+      - name: 업로드 디렉터리 생성
+        run: mkdir -p /tmp/vmlab-test-uploads
+
+      # 이 단계가 요구사항 전체의 회귀 방어선이다.
+      # 실패하면 이후 build/gate 가 실행되지 않고 deploy 도 트리거되지 않는다.
+      - name: pytest
+        run: python3 -m pytest -v --tb=short
+
+      - name: 실패 시 앱 로그 출력
+        if: failure()
+        run: |
+          echo "----- 최근 보안 이벤트 -----"
+          mysql -h 127.0.0.1 -u vmlab -pvmlab_ci_pw vmlab_test \
+            -e "SELECT ts,severity,event_type,detail FROM security_events
+                ORDER BY id DESC LIMIT 20" 2>/dev/null || true
+
+  # ====================================================================
+  # 4. 컨테이너 빌드 검증
+  # ====================================================================
+  build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [lint]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 이미지 빌드
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          load: true
+          tags: vmlab-web:ci-${{ github.sha }}
+          build-args: |
+            APP_VERSION=ci-${{ github.run_number }}
+            GIT_COMMIT=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 하드닝이 회귀하지 않았는지 이미지 자체를 검사한다.
+      # Dockerfile 을 누가 고쳐서 root 로 돌아가면 여기서 잡힌다.
+      - name: 컨테이너가 non-root 로 실행되는지 확인
+        run: |
+          UID_IN_IMAGE=$(docker run --rm vmlab-web:ci-${{ github.sha }} id -u)
+          echo "컨테이너 UID: ${UID_IN_IMAGE}"
+          if [ "${UID_IN_IMAGE}" = "0" ]; then
+            echo "::error::컨테이너가 root 로 실행됩니다 (하드닝 회귀)"
+            exit 1
+          fi
+
+      - name: 런타임 이미지에 빌드 도구가 없는지 확인
+        run: |
+          if docker run --rm vmlab-web:ci-${{ github.sha }} \
+               sh -c "command -v gcc || command -v cc" 2>/dev/null; then
+            echo "::error::런타임 이미지에 컴파일러가 남아있습니다 (multistage 회귀)"
+            exit 1
+          fi
+          echo "컴파일러 없음 확인"
+
+  # ====================================================================
+  # 5. 최종 판정 — deploy.yml 이 이 결과를 본다
+  # ====================================================================
+  gate:
+    name: CI Gate
+    runs-on: ubuntu-latest
+    needs: [lint, security, test, build]
+    if: always()
+
+    steps:
+      - name: 결과 집계
+        run: |
+          echo "lint     : ${{ needs.lint.result }}"
+          echo "security : ${{ needs.security.result }}"
+          echo "test     : ${{ needs.test.result }}"
+          echo "build    : ${{ needs.build.result }}"
+
+          if [ "${{ needs.lint.result }}" != "success" ] \
+            || [ "${{ needs.security.result }}" != "success" ] \
+            || [ "${{ needs.test.result }}" != "success" ] \
+            || [ "${{ needs.build.result }}" != "success" ]; then
+            echo "::error::CI 게이트 실패 — 배포가 차단됩니다"
+            exit 1
+          fi
+          echo "✅ CI 게이트 통과 — 배포 가능"
+
+      - name: 요약 작성
+        if: always()
+        run: |
+          {
+            echo "## CI 결과"
+            echo ""
+            echo "| 단계 | 결과 |"
+            echo "|------|------|"
+            echo "| Lint (ruff) | ${{ needs.lint.result }} |"
+            echo "| Security (bandit/pip-audit) | ${{ needs.security.result }} |"
+            echo "| Test (pytest + MariaDB) | ${{ needs.test.result }} |"
+            echo "| Docker build | ${{ needs.build.result }} |"
+            echo ""
+            echo "커밋: \`${{ github.sha }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"

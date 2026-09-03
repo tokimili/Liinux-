@@ -137,11 +137,13 @@ class _LogWriter:
                     buffer.clear()
                     last_flush = time.monotonic()
 
+        # 스레드 종료 직전 마지막 배치 flush.
+        # 여기서 실패하면 로그가 유실되므로 조용히 넘기지 않고 반드시 남긴다.
         if buffer:
             try:
                 db.execute_many(sql, buffer)
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001
+                log.error("종료 시점 접속 로그 flush 실패 (%d건 유실): %s", len(buffer), exc)
 
 
 _writer = _LogWriter()

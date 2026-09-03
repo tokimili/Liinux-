@@ -22,13 +22,15 @@ from datetime import datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.config import get_config              # noqa: E402
-from app.core import db                        # noqa: E402
-from app.core.security import (                # noqa: E402
-    detect_threats, hash_password, severity_from_score,
+from app.config import get_config  # noqa: E402
+from app.core import db  # noqa: E402
+from app.core.security import (  # noqa: E402
+    detect_threats,
+    hash_password,
+    severity_from_score,
 )
 
-DEMO_PASSWORD = "DemoPass!2026"
+DEMO_PASSWORD = "DemoPass!2026"  # noqa: S105  (데모 시드 계정용, 운영 미사용)
 
 USERS = [
     ("alice", "alice@vmlab.local", "user"),

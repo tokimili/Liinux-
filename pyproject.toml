@@ -1,0 +1,129 @@
+# ==========================================================================
+# 정적 분석 설정 (ruff / bandit).
+#
+# 이 프로젝트는 "의도적으로 취약한 코드"를 포함하므로,
+# 일반적인 린트 규칙을 그대로 적용하면 취약 경로가 전부 에러로 잡힌다.
+# 따라서 규칙을 끄는 대신 **취약 코드가 있는 위치를 명시적으로 예외 처리**하고,
+# 그 이유를 주석으로 남긴다 — 어떤 코드가 왜 위험한지가 문서화된다.
+# ==========================================================================
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = [
+    ".git",
+    ".venv",
+    "node_modules",
+    "dist",
+    "migrations/*.sql",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle 에러
+    "W",    # pycodestyle 경고
+    "F",    # pyflakes (미사용 변수/임포트, 정의되지 않은 이름)
+    "I",    # isort (임포트 정렬)
+    "B",    # flake8-bugbear (실제 버그가 되기 쉬운 패턴)
+    "C4",   # comprehension 개선
+    "UP",   # pyupgrade
+    "S",    # flake8-bandit (보안)
+    "T20",  # print 사용 금지 (앱 코드에서만)
+    "RET",  # 불필요한 return
+    "SIM",  # 단순화 가능
+]
+
+ignore = [
+    "E501",    # 라인 길이 — line-length 로 이미 관리, 한글 주석에서 오탐이 많다
+    "B008",    # 함수 기본값에 함수 호출 — Flask 패턴에서 흔함
+    "SIM105",  # contextlib.suppress 강제 — try/except 가 의도를 더 잘 드러내는 곳이 있다
+    "RET504",  # 불필요한 대입 후 return — 가독성을 위해 남기는 경우가 있다
+    # S104 는 "0.0.0.0 인터페이스 바인드" 규칙인데,
+    # 이 코드베이스에서 걸리는 건 전부 IP 를 못 구했을 때의 **폴백 문자열**
+    #   getattr(g, "client_ip", "0.0.0.0")
+    # 이다. 소켓 바인드가 아니므로 오탐. 실제 바인드 주소는
+    # gunicorn.conf.py / docker-compose.yml 에서 관리하며,
+    # nginx 만 호스트 포트를 갖고 web/db 는 포트를 노출하지 않는다.
+    "S104",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# ---- CLI 스크립트: print 가 사용자 인터페이스다 ----
+"scripts/*.py" = [
+    "T201",  # print 허용
+    "S311",  # random 모듈 — 시드 데이터 생성용, 암호학적 용도 아님
+    "S608",  # SQL 문자열 조립 — 시드/마이그레이션 러너에서 테이블명 보간
+]
+
+# ---- 취약 모드 코드: 의도적으로 안전하지 않다 ----
+# 여기 나열된 규칙은 "이 파일에 취약 경로가 존재한다"는 선언이기도 하다.
+"app/blueprints/board.py" = [
+    "S608",  # [VULN-02] 검색 쿼리 문자열 조립 (SQLi 실습)
+]
+"app/blueprints/auth.py" = [
+    "S608",  # [VULN-01] 로그인 쿼리 문자열 조립 (인증우회 실습)
+    "S105",  # 하드코딩된 비밀번호처럼 보이는 문자열 (더미 해시 상수)
+]
+"app/core/db.py" = [
+    "S608",  # execute_raw — vulnerable 모드 전용 경로
+]
+"app/core/security.py" = [
+    "S105",  # DUMMY_PASSWORD_HASH 상수
+]
+"app/config.py" = [
+    "S105",  # 개발용 기본값 (운영에서는 환경변수로 덮어씀)
+]
+
+# ---- 테스트: assert 와 하드코딩 비밀번호가 본질 ----
+"tests/*.py" = [
+    "S101",  # assert 사용 — 테스트의 존재 이유
+    "S105",  # 테스트용 비밀번호 상수
+    "S106",  # 함수 인자로 넘기는 테스트 비밀번호
+    "S108",  # /tmp 업로드 디렉터리 — 테스트 격리용, 컨테이너에서는 /app/uploads
+    "S608",  # 테스트가 조립하는 SQL
+    "T201",  # 디버그 print
+]
+
+# ---- 관리자 대시보드: WHERE 절 조립 (오탐) ----
+# admin.py / api.py 의 S608 은 f-string 이 들어간 SQL 때문에 걸리지만,
+# 조립되는 것은 **값이 아니라 절(clause) 구조**다:
+#   - _build_log_filters() 는 값을 전부 %s 로 파라미터 바인딩하고
+#     고정된 어휘("ip LIKE %s" 등)만 조립한다
+#   - DATE_FORMAT 버킷 문자열은 코드 내부 리터럴 2종("%Y-%m-%d %H:00" / "%Y-%m-%d")
+#     중에서만 선택되며 사용자 입력이 닿지 않는다
+#   - method / status 는 화이트리스트 검증을 통과한 값만 쓴다
+# tests/test_app.py 의 관리자 라우트 테스트가 이 경로를 실제로 통과시켜 검증한다.
+"app/blueprints/admin.py" = ["S608"]
+"app/blueprints/api.py" = ["S608"]
+
+# ---- Gunicorn 설정: 훅 함수에서 print/로그 ----
+"deploy/gunicorn.conf.py" = ["T201", "S104"]
+
+# ---- wsgi 진입점 ----
+"wsgi.py" = [
+    "S104",  # 0.0.0.0 바인드 — 컨테이너에서는 필수
+    "T201",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app", "scripts", "tests"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+# ==========================================================================
+# bandit
+# ==========================================================================
+[tool.bandit]
+exclude_dirs = [
+    "tests",
+    ".venv",
+    "node_modules",
+    ".git",
+]
+# B101 assert / B104 0.0.0.0 바인드 / B608 SQL 문자열 조립
+#   → 위 ruff per-file-ignores 와 같은 이유로 제외한다.
+#     취약 모드 코드는 의도된 것이며, secure 모드에서 도달 불가함을
+#     tests/test_security.py 의 execute_raw 격리 테스트가 증명한다.
+skips = ["B101", "B104", "B608"]

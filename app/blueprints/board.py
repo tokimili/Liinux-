@@ -22,13 +22,25 @@ import uuid
 from functools import wraps
 
 from flask import (
-    Blueprint, abort, current_app, flash, g, redirect,
-    render_template, request, send_from_directory, session, url_for,
+    Blueprint,
+    abort,
+    current_app,
+    flash,
+    g,
+    redirect,
+    render_template,
+    request,
+    send_from_directory,
+    session,
+    url_for,
 )
 
 from app.core import db
 from app.core.security import (
-    file_sha256, get_extension, is_safe_upload, sanitize_filename,
+    file_sha256,
+    get_extension,
+    is_safe_upload,
+    sanitize_filename,
 )
 
 log = logging.getLogger(__name__)
@@ -202,15 +214,11 @@ def edit_post(post_id: int):
                 "IDOR 시도 차단: user=%s 가 post=%s (소유자=%s) 접근",
                 session.get("user_id"), post_id, post["user_id"],
             )
-            try:
-                db.insert(
-                    "INSERT INTO security_events (severity, event_type, ip, path, detail) "
-                    "VALUES ('medium','idor_attempt',%s,%s,%s)",
-                    (getattr(g, "client_ip", None), request.path,
-                     f"user_id={session.get('user_id')} 가 타인 게시글({post_id}) 수정 시도"),
-                )
-            except Exception:
-                pass
+            db.record_security_event(
+                "medium", "idor_attempt",
+                f"user_id={session.get('user_id')} 가 타인 게시글({post_id}) 수정 시도",
+                ip=getattr(g, "client_ip", None), path=request.path,
+            )
             abort(403)
 
     if request.method == "GET":
@@ -239,7 +247,9 @@ def delete_post(post_id: int):
     if not post:
         abort(404)
 
-    if _mode() != "vulnerable":
+    # 중첩 if 를 유지한다: 바깥은 "모드 스위치", 안쪽은 "소유권 검증"으로
+    # 역할이 다르다. 한 줄로 합치면 취약 모드 토글 지점이 눈에 띄지 않는다.
+    if _mode() != "vulnerable":  # noqa: SIM102
         if post["user_id"] != session.get("user_id") and session.get("role") != "admin":
             abort(403)
 
@@ -292,15 +302,11 @@ def _handle_upload(upload, post_id: int | None) -> tuple[bool, str]:
     else:
         ok, msg = is_safe_upload(upload.filename, head, cfg.ALLOWED_UPLOAD_EXT)
         if not ok:
-            try:
-                db.insert(
-                    "INSERT INTO security_events (severity, event_type, ip, path, detail) "
-                    "VALUES ('high','malicious_upload',%s,%s,%s)",
-                    (getattr(g, "client_ip", None), request.path,
-                     f"차단된 업로드: {upload.filename} — {msg}"),
-                )
-            except Exception:
-                pass
+            db.record_security_event(
+                "high", "malicious_upload",
+                f"차단된 업로드: {upload.filename} — {msg}",
+                ip=getattr(g, "client_ip", None), path=request.path,
+            )
             return False, msg
 
         # 서버가 이름을 생성한다 → 경로 탐색·확장자 위조 원천 차단
