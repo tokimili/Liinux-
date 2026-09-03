@@ -140,7 +140,10 @@ services:
     profiles: ["tunnel"]
     command: tunnel --no-autoupdate run
     environment:
-      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?CLOUDFLARE_TUNNEL_TOKEN 을 .env 에 설정하세요}
+      # 변수명은 cloudflared 가 네이티브로 읽는 TUNNEL_TOKEN 으로 통일한다.
+      # (GitHub Secret 이름은 CLOUDFLARE_TUNNEL_TOKEN 이지만,
+      #  deploy.yml 이 .env 에 기록할 때 TUNNEL_TOKEN 으로 써 넣는다.)
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?TUNNEL_TOKEN 을 .env 에 설정하세요 (scripts/setup_tunnel.sh 참고)}
       # 터널이 바라볼 로컬 서비스는 Cloudflare 대시보드에서 지정한다:
       #   Public hostname → Service: http://nginx:8080
       TUNNEL_METRICS: 0.0.0.0:2000
