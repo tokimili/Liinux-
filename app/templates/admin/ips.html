@@ -1,0 +1,124 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}IP 분석{% endblock %}
+{% block admin_title %}IP 분석 및 차단 관리{% endblock %}
+
+{% block admin_actions %}
+<form method="get" class="inline-form">
+  <label for="h">기간</label>
+  <select id="h" name="hours" onchange="this.form.submit()">
+    <option value="24"  {{ 'selected' if hours == 24 }}>최근 24시간</option>
+    <option value="168" {{ 'selected' if hours == 168 }}>최근 7일</option>
+    <option value="720" {{ 'selected' if hours == 720 }}>최근 30일</option>
+  </select>
+</form>
+{% endblock %}
+
+{% block admin_content %}
+
+<!-- ============ 수동 차단 ============ -->
+<section class="panel">
+  <header class="panel-head"><h2>IP 수동 차단</h2></header>
+  <form method="post" action="{{ url_for('admin.block_ip') }}" class="block-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="field">
+      <label for="ip-input">IP 주소</label>
+      <input type="text" id="ip-input" name="ip" required
+             placeholder="203.0.113.45" pattern="[0-9a-fA-F:.]{3,45}">
+    </div>
+    <div class="field field-grow">
+      <label for="reason-input">차단 사유</label>
+      <input type="text" id="reason-input" name="reason"
+             placeholder="SQL Injection 반복 시도" maxlength="255">
+    </div>
+    <button type="submit" class="btn btn-danger btn-sm">차단 추가</button>
+  </form>
+  <p class="muted small">
+    참고: 앱 레벨 기록입니다. 실제 패킷 차단은 VM 에서 <code>ufw</code> / <code>fail2ban</code> 이 담당합니다
+    (docs/04-defense.md 참조).
+  </p>
+</section>
+
+<!-- ============ 차단 목록 ============ -->
+{% if blocked %}
+<section class="panel">
+  <header class="panel-head"><h2>차단된 IP ({{ blocked|length }})</h2></header>
+  <table class="data-table">
+    <thead>
+      <tr><th>IP</th><th>사유</th><th>차단 시각</th><th>등록자</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for b in blocked %}
+      <tr>
+        <td class="mono">{{ b.ip }}</td>
+        <td class="small">{{ b.reason or '—' }}</td>
+        <td class="mono small">{{ b.blocked_at.strftime('%Y-%m-%d %H:%M') if b.blocked_at }}</td>
+        <td class="small">{{ b.created_by or '—' }}</td>
+        <td>
+          <form method="post" action="{{ url_for('admin.unblock_ip') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="ip" value="{{ b.ip }}">
+            <button type="submit" class="btn btn-ghost btn-xs">해제</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<!-- ============ IP 통계 ============ -->
+<section class="panel">
+  <header class="panel-head">
+    <h2>접속 IP 통계</h2>
+    <span class="muted">위협점수 높은 순</span>
+  </header>
+  <table class="data-table table-compact">
+    <thead>
+      <tr>
+        <th>IP</th><th>국가</th><th class="num">요청</th><th class="num">경로수</th>
+        <th class="num">오류</th><th class="num">위협요청</th><th class="num">최고위협</th>
+        <th class="num">로그인실패</th><th>최초</th><th>최근</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      <tr class="{{ 'row-threat' if r.max_threat >= 35 }}">
+        <td class="mono small">
+          <a href="{{ url_for('admin.logs', ip=r.ip) }}">{{ r.ip }}</a>
+          {% if r.is_blocked %}<span class="badge badge-critical">차단</span>{% endif %}
+        </td>
+        <td class="small">{{ r.country or '—' }}</td>
+        <td class="num">{{ '{:,}'.format(r.hits) }}</td>
+        <td class="num">{{ r.distinct_paths }}</td>
+        <td class="num {{ 'text-warn' if r.errors }}">{{ r.errors }}</td>
+        <td class="num {{ 'text-danger' if r.threat_hits }}">{{ r.threat_hits }}</td>
+        <td class="num">
+          {% if r.max_threat >= 60 %}<span class="badge badge-critical">{{ r.max_threat }}</span>
+          {% elif r.max_threat >= 35 %}<span class="badge badge-high">{{ r.max_threat }}</span>
+          {% elif r.max_threat > 0 %}<span class="badge badge-low">{{ r.max_threat }}</span>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+        <td class="num {{ 'text-warn' if r.failed_logins }}">{{ r.failed_logins }}</td>
+        <td class="mono small">{{ r.first_seen.strftime('%m-%d %H:%M') if r.first_seen }}</td>
+        <td class="mono small">{{ r.last_seen.strftime('%m-%d %H:%M') if r.last_seen }}</td>
+        <td>
+          {% if not r.is_blocked %}
+          <form method="post" action="{{ url_for('admin.block_ip') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="ip" value="{{ r.ip }}">
+            <input type="hidden" name="reason"
+                   value="대시보드에서 차단 (최고 위협점수 {{ r.max_threat }})">
+            <button type="submit" class="btn btn-ghost btn-xs">차단</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="11" class="empty">접속 기록이 없습니다.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% endblock %}

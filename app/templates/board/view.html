@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}{{ post.title }}{% endblock %}
+
+{% block content %}
+<article id="post-detail" class="panel">
+  <header class="post-head">
+    <h1 id="post-title">{{ post.title }}</h1>
+    <p class="post-meta">
+      <span>{{ post.username }}</span>
+      <span>·</span>
+      <span class="mono">{{ post.created_at.strftime('%Y-%m-%d %H:%M') if post.created_at }}</span>
+      <span>·</span>
+      <span>조회 {{ post.view_count }}</span>
+    </p>
+  </header>
+
+  {#
+    XSS 방어는 "저장 시 필터링"이 아니라 "출력 시 이스케이프"로 한다.
+    secure 모드  : Jinja2 자동 이스케이프 그대로 → <script> 가 문자로 표시됨
+    vulnerable 모드: |safe 로 원문 삽입 → 저장형 XSS(VULN-03) 재현
+  #}
+  <div id="post-content" class="post-body">
+    {%- if is_vulnerable -%}
+      {{ post.content|safe }}
+    {%- else -%}
+      {{ post.content }}
+    {%- endif -%}
+  </div>
+
+  {% if files %}
+  <section id="post-files" class="attach-box">
+    <h2>첨부파일</h2>
+    <ul class="attach-list">
+    {% for f in files %}
+      <li>
+        <a href="{{ url_for('board.download_file', file_id=f.id) }}">{{ f.original_name }}</a>
+        <span class="muted small">
+          {{ (f.size_bytes / 1024)|round(1) }} KB
+          {% if f.mime_type %}· {{ f.mime_type }}{% endif %}
+        </span>
+      </li>
+    {% endfor %}
+    </ul>
+    {% if is_vulnerable %}
+      <p class="callout callout-danger small">
+        <strong>vulnerable 모드:</strong> 업로드 검증이 없고(VULN-05)
+        다운로드 시 <code>Content-Disposition: inline</code> 으로 응답합니다.
+      </p>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  <footer class="post-actions">
+    <a href="{{ url_for('board.list_posts') }}" class="btn btn-ghost btn-sm">목록</a>
+
+    {% if current_user %}
+      {% set can_edit = is_vulnerable
+                        or post.user_id == current_user.id
+                        or current_user.role == 'admin' %}
+      {% if can_edit %}
+        <a href="{{ url_for('board.edit_post', post_id=post.id) }}"
+           class="btn btn-ghost btn-sm">수정</a>
+        <form method="post" action="{{ url_for('board.delete_post', post_id=post.id) }}"
+              class="inline-form" onsubmit="return confirm('정말 삭제하시겠습니까?');">
+          {% if not is_vulnerable %}
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+          {% endif %}
+          <button type="submit" class="btn btn-danger btn-sm">삭제</button>
+        </form>
+      {% endif %}
+    {% endif %}
+  </footer>
+
+  {% if is_vulnerable %}
+  <p class="callout callout-danger small">
+    <strong>vulnerable 모드:</strong> 수정 화면에 소유권 검증이 없습니다(VULN-04 · IDOR).
+    <code>/board/&lt;다른_글_id&gt;/edit</code> 로 직접 접근해 보세요.
+  </p>
+  {% endif %}
+</article>
+
+<!-- ============ 댓글 ============ -->
+<section id="comment-section" class="panel">
+  <header class="panel-head">
+    <h2>댓글 <span class="muted">({{ comments|length }})</span></h2>
+  </header>
+
+  <ul class="comment-list">
+  {% for c in comments %}
+    <li class="comment-item">
+      <div class="comment-meta">
+        <strong>{{ c.username }}</strong>
+        <span class="mono small muted">
+          {{ c.created_at.strftime('%Y-%m-%d %H:%M') if c.created_at }}
+        </span>
+      </div>
+      <div class="comment-body">
+        {#- 저장형 XSS(VULN-03) 분기 지점 -#}
+        {%- if is_vulnerable -%}
+          {{ c.content|safe }}
+        {%- else -%}
+          {{ c.content }}
+        {%- endif -%}
+      </div>
+    </li>
+  {% else %}
+    <li class="empty">첫 댓글을 남겨보세요.</li>
+  {% endfor %}
+  </ul>
+
+  {% if current_user %}
+  <form method="post" action="{{ url_for('board.add_comment', post_id=post.id) }}"
+        id="comment-form" class="comment-form">
+    {% if not is_vulnerable %}
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% endif %}
+    <label for="comment-input" class="sr-only">댓글 내용</label>
+    <textarea id="comment-input" name="content" rows="3" maxlength="1000"
+              placeholder="댓글을 입력하세요" required></textarea>
+    <button type="submit" class="btn btn-primary btn-sm">댓글 등록</button>
+  </form>
+  {% else %}
+    <p class="muted">
+      댓글을 쓰려면 <a href="{{ url_for('auth.login', next=request.path) }}">로그인</a>이 필요합니다.
+    </p>
+  {% endif %}
+
+  {% if is_vulnerable %}
+  <p class="callout callout-danger small">
+    <strong>vulnerable 모드:</strong> 댓글이 <code>|safe</code> 로 렌더링됩니다(VULN-03).
+    실습 예시 — <code>&lt;img src=x onerror=alert(document.cookie)&gt;</code>
+  </p>
+  {% endif %}
+</section>
+{% endblock %}

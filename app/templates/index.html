@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}홈{% endblock %}
+
+{% block content %}
+<section id="hero-section" class="hero">
+  <h1>로컬 VM 보안 실습 플랫폼</h1>
+  <p class="hero-lead">
+    Ubuntu VM 에 Docker 로 배포되고, GitHub Actions CI/CD 로 자동 배포되며,
+    모든 접속이 기록되어 관리자 대시보드에서 분석되는 웹 서비스입니다.
+  </p>
+  <div class="hero-actions">
+    <a href="{{ url_for('board.list_posts') }}" class="btn btn-primary">게시판 보기</a>
+    <a href="{{ url_for('main.about') }}" class="btn btn-ghost">아키텍처 살펴보기</a>
+  </div>
+</section>
+
+<section id="stats-section" class="stat-grid" aria-label="서비스 통계">
+  <article class="stat-card">
+    <h2>게시글</h2>
+    <p class="stat-value">{{ '{:,}'.format(stats.posts or 0) }}</p>
+  </article>
+  <article class="stat-card">
+    <h2>회원</h2>
+    <p class="stat-value">{{ '{:,}'.format(stats.users or 0) }}</p>
+  </article>
+  <article class="stat-card">
+    <h2>오늘 요청</h2>
+    <p class="stat-value">{{ '{:,}'.format(stats.requests_today or 0) }}</p>
+  </article>
+  <article class="stat-card {{ 'stat-danger' if (stats.threats_today or 0) > 0 }}">
+    <h2>오늘 위협 탐지</h2>
+    <p class="stat-value">{{ '{:,}'.format(stats.threats_today or 0) }}</p>
+  </article>
+</section>
+
+<div class="two-col">
+  <section id="recent-posts" class="panel">
+    <header class="panel-head">
+      <h2>최근 게시글</h2>
+      <a href="{{ url_for('board.list_posts') }}" class="link-more">전체 보기</a>
+    </header>
+    <ul class="post-list">
+    {% for p in recent_posts %}
+      <li>
+        <a href="{{ url_for('board.view_post', post_id=p.id) }}">{{ p.title }}</a>
+        <span class="post-meta">
+          {{ p.username }} · 조회 {{ p.view_count }} ·
+          {{ p.created_at.strftime('%m-%d %H:%M') if p.created_at }}
+        </span>
+      </li>
+    {% else %}
+      <li class="empty">
+        아직 게시글이 없습니다.
+        {% if current_user %}
+          <a href="{{ url_for('board.create_post') }}">첫 글을 작성해 보세요.</a>
+        {% endif %}
+      </li>
+    {% endfor %}
+    </ul>
+  </section>
+
+  <section id="deploy-info" class="panel">
+    <header class="panel-head"><h2>배포 정보</h2></header>
+    <dl class="info-list">
+      <dt>보안 모드</dt>
+      <dd>
+        <span class="badge {{ 'badge-critical' if is_vulnerable else 'badge-ok' }}">
+          {{ security_mode }}
+        </span>
+      </dd>
+      <dt>버전</dt><dd>{{ app_version }}</dd>
+      <dt>커밋</dt><dd><code>{{ git_commit or 'unknown' }}</code></dd>
+      {% if last_deploy %}
+        <dt>최근 배포</dt>
+        <dd class="mono small">
+          {{ last_deploy.deployed_at.strftime('%Y-%m-%d %H:%M') if last_deploy.deployed_at }}
+        </dd>
+        <dt>배포자</dt><dd class="small">{{ last_deploy.actor or '—' }}</dd>
+      {% else %}
+        <dt>최근 배포</dt><dd class="muted small">기록 없음 (수동 실행 중)</dd>
+      {% endif %}
+    </dl>
+    <p class="small muted">
+      이 정보는 CI/CD 파이프라인이 배포할 때 주입한 값입니다.
+      배포가 실제로 반영되었는지 확인하는 지표로 사용합니다.
+    </p>
+  </section>
+</div>
+
+<section id="tech-stack" class="panel">
+  <header class="panel-head"><h2>기술 스택</h2></header>
+  <div class="stack-grid">
+    <div><h3>인프라</h3><p>VirtualBox · Ubuntu Server 24.04 · Docker Compose</p></div>
+    <div><h3>웹 계층</h3><p>Nginx 리버스프록시 · Gunicorn (gthread)</p></div>
+    <div><h3>애플리케이션</h3><p>Python 3.12 · Flask 3 · Jinja2</p></div>
+    <div><h3>데이터</h3><p>MariaDB · 커넥션 풀 · 마이그레이션 관리</p></div>
+    <div><h3>CI/CD</h3><p>GitHub Actions · self-hosted runner · 자동 롤백</p></div>
+    <div><h3>보안</h3><p>CSP · CSRF · 접속 로그 분석 · 위협 탐지</p></div>
+  </div>
+</section>
+{% endblock %}

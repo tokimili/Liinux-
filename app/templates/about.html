@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}아키텍처{% endblock %}
+
+{% block content %}
+<article class="doc-page">
+  <h1>아키텍처 및 데이터 흐름</h1>
+  <p class="lead">
+    이 페이지는 포트폴리오 방문자(면접관 포함)가 시스템 구성을 한눈에 파악하도록
+    만든 설명 페이지입니다.
+  </p>
+
+  <section>
+    <h2>1. 배포 파이프라인</h2>
+    <pre class="diagram">
+개발 PC                GitHub                    로컬 VM (Ubuntu 24.04)
+  │                      │                              │
+  │  git push main       │                              │
+  ├─────────────────────▶│                              │
+  │                      │  ① CI: lint·보안스캔·테스트    │
+  │                      │                              │
+  │                      │  ② self-hosted runner 가      │
+  │                      │     작업을 가져감 (pull)       │
+  │                      │◀─────────────────────────────┤
+  │                      │                              │
+  │                      │  ③ docker compose up --build │
+  │                      │  ④ DB 마이그레이션 적용        │
+  │                      │  ⑤ /healthz 검증              │
+  │                      │  ⑥ 실패 시 이전 이미지 롤백    │
+    </pre>
+    <p>
+      VM 이 NAT 뒤에 있어 GitHub 가 VM 으로 접속할 수 없으므로,
+      VM 안의 러너가 GitHub 에 주기적으로 물어보는 <strong>pull 방식</strong>을 사용합니다.
+      공유기 포트를 열지 않아도 배포가 됩니다.
+    </p>
+  </section>
+
+  <section>
+    <h2>2. 요청 처리 흐름 (데이터 흐름)</h2>
+    <pre class="diagram">
+[외부 사용자]
+     │  HTTPS
+     ▼
+[Cloudflare Tunnel]  ← VM 이 바깥으로 연결 (인바운드 포트 개방 없음)
+     │
+     ▼
+[Nginx]  리버스프록시 · 정적파일 · 요청 크기 제한 · 레이트리밋
+     │  proxy_pass (X-Forwarded-For / X-Real-IP 전달)
+     ▼
+[Gunicorn]  WSGI · 워커 프로세스 관리
+     │
+     ▼
+[Flask 애플리케이션]
+     │  ① before_request  : 클라이언트 IP 판별, 타이머 시작
+     │  ② CSRF 검증        : 상태 변경 요청 토큰 확인
+     │  ③ 라우팅 · 입력검증 · 권한확인
+     │  ④ DB 접근          : 파라미터 바인딩 쿼리
+     │  ⑤ 템플릿 렌더링    : 자동 이스케이프
+     │  ⑥ after_request   : 보안 헤더 부착
+     │  ⑦ 접속 로그 적재   : 위협 패턴 분석 후 비동기 기록
+     ▼
+[MariaDB]  게시판 데이터 + 접속 로그 + 보안 이벤트
+     │
+     ▼
+[관리자 대시보드]  로그 집계 · 공격 탐지 · IP 분석
+    </pre>
+  </section>
+
+  <section>
+    <h2>3. 접속 로그 수집 구조</h2>
+    <p>
+      모든 요청은 응답 직후 <code>after_request</code> 훅에서 분석됩니다.
+      URL 인코딩을 2단계까지 해제한 뒤 SQL Injection·XSS·경로탐색·명령주입 등
+      패턴을 검사해 <strong>위협 점수(0~100)</strong>와 태그를 산출합니다.
+    </p>
+    <ul>
+      <li><strong>비동기 적재</strong>: 큐 + 백그라운드 스레드로 배치 INSERT — 응답 지연 없음</li>
+      <li><strong>민감정보 마스킹</strong>: 비밀번호·토큰 파라미터는 값을 저장하지 않음</li>
+      <li><strong>장애 격리</strong>: 로그 적재가 실패해도 서비스는 정상 동작</li>
+      <li><strong>보존 기간</strong>: 기본 90일 후 삭제 (IP 는 개인정보로 취급)</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>4. 이중 모드 설계</h2>
+    <p>
+      환경변수 <code>SECURITY_MODE</code> 하나로 동일 코드베이스가 두 얼굴을 가집니다.
+      이것이 "취약점 → 방어" Before/After 를 증명하는 장치입니다.
+    </p>
+    <table class="doc-table">
+      <thead>
+        <tr><th>구분</th><th>vulnerable</th><th>secure (기본값)</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>SQL 쿼리</td><td>문자열 조립</td><td>파라미터 바인딩</td></tr>
+        <tr><td>출력 처리</td><td>이스케이프 없음</td><td>자동 이스케이프 + CSP</td></tr>
+        <tr><td>CSRF</td><td>검증 없음</td><td>토큰 검증</td></tr>
+        <tr><td>객체 접근</td><td>소유권 미확인</td><td>소유권·역할 확인</td></tr>
+        <tr><td>업로드</td><td>검증 없음</td><td>확장자·매직바이트 3중 검증</td></tr>
+        <tr><td>로그인</td><td>시도 제한 없음</td><td>브루트포스 차단 + 타이밍 방어</td></tr>
+        <tr><td>보안 헤더</td><td>없음</td><td>CSP·HSTS·X-Frame-Options 등</td></tr>
+        <tr><td>네트워크</td><td>격리 (외부 차단)</td><td>터널로 외부 공개 가능</td></tr>
+      </tbody>
+    </table>
+    <p class="callout callout-danger">
+      <strong>주의:</strong> vulnerable 모드는 절대 인터넷에 노출하지 않습니다.
+      호스트 전용 네트워크에서 Kali VM 으로만 접근합니다.
+    </p>
+  </section>
+</article>
+{% endblock %}

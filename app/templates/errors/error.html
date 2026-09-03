@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} 오류{% endblock %}
+
+{% block content %}
+<section id="error-section" class="error-wrap">
+  <p class="error-code">{{ code }}</p>
+  <h1 class="error-message">{{ message }}</h1>
+
+  <p class="muted">
+    {#
+      OWASP A10 — 예외 상세(스택 트레이스, 쿼리, 파일 경로)를 사용자에게
+      노출하지 않는다. 상세 내용은 서버 로그와 대시보드에만 기록된다.
+    #}
+    자세한 내용은 서버 로그에 기록되었습니다.
+    문제가 계속되면 관리자에게 문의하세요.
+  </p>
+
+  <div class="error-actions">
+    <a href="{{ url_for('main.index') }}" class="btn btn-primary">홈으로</a>
+    <a href="{{ url_for('board.list_posts') }}" class="btn btn-ghost">게시판</a>
+  </div>
+</section>
+{% endblock %}

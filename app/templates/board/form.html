@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ '게시글 수정' if post else '새 게시글' }}{% endblock %}
+
+{% block content %}
+<section id="post-form-section" class="panel form-panel">
+  <header class="panel-head">
+    <h1>{{ '게시글 수정' if post else '새 게시글 작성' }}</h1>
+  </header>
+
+  <form method="post"
+        action="{{ url_for('board.edit_post', post_id=post.id) if post else url_for('board.create_post') }}"
+        enctype="multipart/form-data" class="stack-form" id="post-form">
+    {% if not is_vulnerable %}
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    {% endif %}
+
+    <div class="field">
+      <label for="post-title-input">제목</label>
+      <input type="text" id="post-title-input" name="title"
+             value="{{ post.title if post else '' }}"
+             required maxlength="200" autofocus>
+    </div>
+
+    <div class="field">
+      <label for="post-content-input">내용</label>
+      <textarea id="post-content-input" name="content" rows="14" required>{{ post.content if post else '' }}</textarea>
+    </div>
+
+    {% if not post %}
+    <div class="field">
+      <label for="post-attachment">첨부파일 <span class="muted">(선택)</span></label>
+      <input type="file" id="post-attachment" name="attachment">
+      <small class="hint">
+        {% if is_vulnerable %}
+          vulnerable 모드: 확장자·시그니처 검증이 없습니다 (VULN-05 · 웹셸 업로드 가능).
+        {% else %}
+          허용 확장자: png, jpg, jpeg, gif, pdf, txt, md · 최대 5MB ·
+          매직바이트까지 검증하며 서버가 파일명을 재생성합니다.
+        {% endif %}
+      </small>
+    </div>
+    {% endif %}
+
+    <div class="form-actions">
+      <button type="submit" class="btn btn-primary">
+        {{ '수정 완료' if post else '등록' }}
+      </button>
+      <a href="{{ url_for('board.view_post', post_id=post.id) if post else url_for('board.list_posts') }}"
+         class="btn btn-ghost">취소</a>
+    </div>
+  </form>
+</section>
+{% endblock %}

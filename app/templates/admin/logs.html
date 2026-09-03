@@ -1,0 +1,131 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}접속 로그{% endblock %}
+{% block admin_title %}접속 로그 조회{% endblock %}
+
+{% block admin_actions %}
+<a href="{{ url_for('admin.logs_csv', **filters) }}" class="btn btn-primary btn-sm">
+  현재 조건 CSV 내보내기
+</a>
+{% endblock %}
+
+{% block admin_content %}
+
+<!-- ============ 필터 ============ -->
+<form method="get" id="log-filter" class="filter-panel">
+  <div class="filter-grid">
+    <div class="field">
+      <label for="f-ip">IP</label>
+      <input type="text" id="f-ip" name="ip" value="{{ filters.get('ip','') }}"
+             placeholder="192.168." autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="f-path">경로</label>
+      <input type="text" id="f-path" name="path" value="{{ filters.get('path','') }}"
+             placeholder="/admin" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="f-method">메서드</label>
+      <select id="f-method" name="method">
+        <option value="">전체</option>
+        {% for m in ['GET','POST','PUT','PATCH','DELETE','HEAD'] %}
+          <option value="{{ m }}" {{ 'selected' if filters.get('method') == m }}>{{ m }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-status">상태</label>
+      <select id="f-status" name="status">
+        <option value="">전체</option>
+        <option value="2xx" {{ 'selected' if filters.get('status') == '2xx' }}>2xx 성공</option>
+        <option value="3xx" {{ 'selected' if filters.get('status') == '3xx' }}>3xx 리다이렉트</option>
+        <option value="4xx" {{ 'selected' if filters.get('status') == '4xx' }}>4xx 클라이언트 오류</option>
+        <option value="5xx" {{ 'selected' if filters.get('status') == '5xx' }}>5xx 서버 오류</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-username">사용자</label>
+      <input type="text" id="f-username" name="username"
+             value="{{ filters.get('username','') }}" autocomplete="off">
+    </div>
+    <div class="field">
+      <label for="f-hours">기간</label>
+      <select id="f-hours" name="hours">
+        <option value="">전체</option>
+        <option value="1"   {{ 'selected' if filters.get('hours') == '1' }}>최근 1시간</option>
+        <option value="24"  {{ 'selected' if filters.get('hours') == '24' }}>최근 24시간</option>
+        <option value="168" {{ 'selected' if filters.get('hours') == '168' }}>최근 7일</option>
+        <option value="720" {{ 'selected' if filters.get('hours') == '720' }}>최근 30일</option>
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-minscore">최소 위협점수</label>
+      <input type="number" id="f-minscore" name="min_score" min="0" max="100"
+             value="{{ filters.get('min_score','') }}" placeholder="0">
+    </div>
+    <div class="field field-check">
+      <label>
+        <input type="checkbox" name="threats_only" value="1"
+               {{ 'checked' if filters.get('threats_only') == '1' }}>
+        위협 탐지만 보기
+      </label>
+    </div>
+  </div>
+  <div class="filter-actions">
+    <button type="submit" class="btn btn-primary btn-sm">조회</button>
+    <a href="{{ url_for('admin.logs') }}" class="btn btn-ghost btn-sm">초기화</a>
+    <span class="result-count">총 <strong>{{ '{:,}'.format(total or 0) }}</strong>건</span>
+  </div>
+</form>
+
+<!-- ============ 로그 테이블 ============ -->
+<section class="panel">
+  <table class="data-table table-compact">
+    <thead>
+      <tr>
+        <th>시각</th><th>IP</th><th>메서드</th><th>경로</th><th>쿼리</th>
+        <th class="num">상태</th><th class="num">ms</th><th class="num">bytes</th>
+        <th>사용자</th><th>위협</th><th>User-Agent</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      <tr class="{{ 'row-threat' if r.threat_score >= 35 }}">
+        <td class="mono small nowrap">{{ r.ts.strftime('%m-%d %H:%M:%S') if r.ts }}</td>
+        <td class="mono small">
+          <a href="{{ url_for('admin.logs', ip=r.ip) }}">{{ r.ip }}</a>
+        </td>
+        <td><span class="method method-{{ r.method|lower }}">{{ r.method }}</span></td>
+        <td class="mono small truncate" title="{{ r.path }}">{{ r.path }}</td>
+        <td class="mono small truncate" title="{{ r.query_string or '' }}">
+          {{ (r.query_string or '')[:40] }}
+        </td>
+        <td class="num">
+          <span class="status status-{{ (r.status_code // 100) }}xx">{{ r.status_code }}</span>
+        </td>
+        <td class="num small">{{ r.duration_ms }}</td>
+        <td class="num small">{{ r.bytes_sent }}</td>
+        <td class="small">{{ r.username or '—' }}</td>
+        <td class="small">
+          {% if r.threat_score >= 60 %}
+            <span class="badge badge-critical">{{ r.threat_score }}</span>
+          {% elif r.threat_score >= 35 %}
+            <span class="badge badge-high">{{ r.threat_score }}</span>
+          {% elif r.threat_score > 0 %}
+            <span class="badge badge-low">{{ r.threat_score }}</span>
+          {% else %}<span class="muted">—</span>{% endif %}
+          {% if r.threat_tags %}<br><span class="tags">{{ r.threat_tags }}</span>{% endif %}
+        </td>
+        <td class="small truncate" title="{{ r.user_agent or '' }}">
+          {{ (r.user_agent or '—')[:38] }}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="11" class="empty">조건에 맞는 로그가 없습니다.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% include "admin/_pagination.html" %}
+
+{% endblock %}

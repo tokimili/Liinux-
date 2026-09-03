@@ -1,0 +1,255 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}대시보드{% endblock %}
+{% block admin_title %}보안 모니터링 대시보드{% endblock %}
+
+{% block admin_actions %}
+<form method="get" class="inline-form">
+  <label for="hours-select">기간</label>
+  <select id="hours-select" name="hours" onchange="this.form.submit()">
+    <option value="1"   {{ 'selected' if hours == 1 }}>최근 1시간</option>
+    <option value="6"   {{ 'selected' if hours == 6 }}>최근 6시간</option>
+    <option value="24"  {{ 'selected' if hours == 24 }}>최근 24시간</option>
+    <option value="72"  {{ 'selected' if hours == 72 }}>최근 3일</option>
+    <option value="168" {{ 'selected' if hours == 168 }}>최근 7일</option>
+    <option value="720" {{ 'selected' if hours == 720 }}>최근 30일</option>
+  </select>
+</form>
+<a href="{{ url_for('admin.logs_csv', hours=hours) }}" class="btn btn-ghost btn-sm">CSV 내보내기</a>
+{% endblock %}
+
+{% block admin_content %}
+
+<!-- ============ KPI 카드 ============ -->
+<section id="kpi-cards" class="kpi-grid" aria-label="핵심 지표">
+  <article class="kpi-card">
+    <h3>총 요청</h3>
+    <p class="kpi-value" id="kpi-total">{{ '{:,}'.format(kpi.total_requests or 0) }}</p>
+    <p class="kpi-sub">최근 {{ hours }}시간</p>
+  </article>
+
+  <article class="kpi-card">
+    <h3>고유 IP</h3>
+    <p class="kpi-value" id="kpi-ips">{{ '{:,}'.format(kpi.unique_ips or 0) }}</p>
+    <p class="kpi-sub">접속 출처 수</p>
+  </article>
+
+  <article class="kpi-card {{ 'kpi-danger' if (kpi.threat_requests or 0) > 0 }}">
+    <h3>위협 탐지</h3>
+    <p class="kpi-value" id="kpi-threats">{{ '{:,}'.format(kpi.threat_requests or 0) }}</p>
+    <p class="kpi-sub">위협점수 35 이상</p>
+  </article>
+
+  <article class="kpi-card {{ 'kpi-warn' if (kpi.error_requests or 0) > 0 }}">
+    <h3>오류 응답</h3>
+    <p class="kpi-value" id="kpi-errors">{{ '{:,}'.format(kpi.error_requests or 0) }}</p>
+    <p class="kpi-sub">4xx · 5xx</p>
+  </article>
+
+  <article class="kpi-card">
+    <h3>평균 응답</h3>
+    <p class="kpi-value">{{ kpi.avg_duration }}<small>ms</small></p>
+    <p class="kpi-sub">최대 {{ kpi.p95_duration }}ms</p>
+  </article>
+
+  <article class="kpi-card {{ 'kpi-warn' if (kpi.failed_logins or 0) > 0 }}">
+    <h3>로그인 실패</h3>
+    <p class="kpi-value">{{ '{:,}'.format(kpi.failed_logins or 0) }}</p>
+    <p class="kpi-sub">브루트포스 지표</p>
+  </article>
+
+  <article class="kpi-card {{ 'kpi-danger' if (kpi.open_events or 0) > 0 }}">
+    <h3>미처리 경보</h3>
+    <p class="kpi-value">{{ '{:,}'.format(kpi.open_events or 0) }}</p>
+    <p class="kpi-sub">확인이 필요합니다</p>
+  </article>
+
+  <article class="kpi-card">
+    <h3>차단 IP</h3>
+    <p class="kpi-value">{{ '{:,}'.format(kpi.blocked_ips or 0) }}</p>
+    <p class="kpi-sub">회원 {{ kpi.total_users }} · 글 {{ kpi.total_posts }}</p>
+  </article>
+</section>
+
+<!-- ============ 차트 ============ -->
+<section class="chart-row" aria-label="트래픽 추이">
+  <article class="panel panel-wide">
+    <header class="panel-head">
+      <h2>시간대별 트래픽</h2>
+      <span class="muted">{{ '시간' if timeline_label == 'hour' else '일' }} 단위 집계</span>
+    </header>
+    <div class="chart-box">
+      <canvas id="traffic-chart"
+              data-hours="{{ hours }}"
+              aria-label="시간대별 요청 수 차트"></canvas>
+    </div>
+  </article>
+
+  <article class="panel">
+    <header class="panel-head"><h2>상태 코드 분포</h2></header>
+    <div class="chart-box chart-box-sm">
+      <canvas id="status-chart" data-hours="{{ hours }}"
+              aria-label="상태 코드 분포 차트"></canvas>
+    </div>
+  </article>
+</section>
+
+<!-- ============ 상위 IP / 경로 ============ -->
+<section class="panel-row">
+  <article class="panel">
+    <header class="panel-head">
+      <h2>상위 접속 IP</h2>
+      <a href="{{ url_for('admin.ips') }}" class="link-more">전체 보기</a>
+    </header>
+    <table class="data-table">
+      <thead>
+        <tr><th>IP</th><th class="num">요청</th><th class="num">오류</th>
+            <th class="num">위협</th><th>최근 접속</th></tr>
+      </thead>
+      <tbody>
+      {% for r in top_ips %}
+        <tr>
+          <td><a href="{{ url_for('admin.logs', ip=r.ip) }}" class="mono">{{ r.ip }}</a></td>
+          <td class="num">{{ '{:,}'.format(r.hits) }}</td>
+          <td class="num {{ 'text-warn' if r.errors }}">{{ r.errors }}</td>
+          <td class="num">
+            {% if r.max_threat >= 60 %}<span class="badge badge-critical">{{ r.max_threat }}</span>
+            {% elif r.max_threat >= 35 %}<span class="badge badge-high">{{ r.max_threat }}</span>
+            {% elif r.max_threat > 0 %}<span class="badge badge-low">{{ r.max_threat }}</span>
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td class="mono small">{{ r.last_seen.strftime('%m-%d %H:%M:%S') if r.last_seen }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="5" class="empty">데이터가 없습니다.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </article>
+
+  <article class="panel">
+    <header class="panel-head"><h2>상위 요청 경로</h2></header>
+    <table class="data-table">
+      <thead>
+        <tr><th>경로</th><th class="num">요청</th>
+            <th class="num">평균(ms)</th><th class="num">오류</th></tr>
+      </thead>
+      <tbody>
+      {% for r in top_paths %}
+        <tr>
+          <td class="mono truncate" title="{{ r.path }}">{{ r.path }}</td>
+          <td class="num">{{ '{:,}'.format(r.hits) }}</td>
+          <td class="num">{{ r.avg_ms }}</td>
+          <td class="num {{ 'text-warn' if r.errors }}">{{ r.errors }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="empty">데이터가 없습니다.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </article>
+</section>
+
+<!-- ============ 보안 경보 ============ -->
+<section class="panel">
+  <header class="panel-head">
+    <h2>최근 보안 이벤트</h2>
+    <a href="{{ url_for('admin.threats') }}" class="link-more">전체 보기</a>
+  </header>
+  <table class="data-table">
+    <thead>
+      <tr><th>시각</th><th>심각도</th><th>유형</th>
+          <th>IP</th><th>경로</th><th>상세</th></tr>
+    </thead>
+    <tbody>
+    {% for e in recent_events %}
+      <tr>
+        <td class="mono small">{{ e.ts.strftime('%m-%d %H:%M:%S') if e.ts }}</td>
+        <td><span class="badge badge-{{ e.severity }}">{{ e.severity }}</span></td>
+        <td class="mono small">{{ e.event_type }}</td>
+        <td class="mono small">{{ e.ip or '—' }}</td>
+        <td class="mono small truncate" title="{{ e.path }}">{{ e.path or '—' }}</td>
+        <td class="small truncate" title="{{ e.detail }}">{{ (e.detail or '')[:70] }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="empty">탐지된 보안 이벤트가 없습니다.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<!-- ============ 실시간 접속 ============ -->
+<section class="panel">
+  <header class="panel-head">
+    <h2>실시간 접속 기록</h2>
+    <a href="{{ url_for('admin.logs') }}" class="link-more">전체 로그</a>
+  </header>
+  <table class="data-table table-compact">
+    <thead>
+      <tr><th>시각</th><th>IP</th><th>메서드</th><th>경로</th>
+          <th class="num">상태</th><th class="num">ms</th>
+          <th>사용자</th><th>위협</th></tr>
+    </thead>
+    <tbody id="live-log-body">
+    {% for r in recent_logs %}
+      <tr class="{{ 'row-threat' if r.threat_score >= 35 }}">
+        <td class="mono small">{{ r.ts.strftime('%H:%M:%S') if r.ts }}</td>
+        <td class="mono small">{{ r.ip }}</td>
+        <td><span class="method method-{{ r.method|lower }}">{{ r.method }}</span></td>
+        <td class="mono small truncate" title="{{ r.path }}">{{ r.path }}</td>
+        <td class="num">
+          <span class="status status-{{ (r.status_code // 100) }}xx">{{ r.status_code }}</span>
+        </td>
+        <td class="num small">{{ r.duration_ms }}</td>
+        <td class="small">{{ r.username or '—' }}</td>
+        <td class="small">
+          {% if r.threat_tags %}<span class="tags">{{ r.threat_tags }}</span>
+          {% else %}<span class="muted">—</span>{% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="empty">접속 기록이 없습니다.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<!-- ============ 배포 이력 ============ -->
+<section class="panel">
+  <header class="panel-head">
+    <h2>최근 배포 (CI/CD)</h2>
+    <a href="{{ url_for('admin.deployments') }}" class="link-more">전체 보기</a>
+  </header>
+  <table class="data-table">
+    <thead>
+      <tr><th>배포 시각</th><th>커밋</th><th>브랜치/태그</th>
+          <th>버전</th><th>실행자</th><th>모드</th></tr>
+    </thead>
+    <tbody>
+    {% for d in deployments %}
+      <tr>
+        <td class="mono small">{{ d.deployed_at.strftime('%Y-%m-%d %H:%M:%S') if d.deployed_at }}</td>
+        <td><code>{{ (d.git_commit or '')[:7] or '—' }}</code></td>
+        <td class="small">{{ d.git_ref or '—' }}</td>
+        <td class="small">{{ d.app_version or '—' }}</td>
+        <td class="small">{{ d.actor or '—' }}</td>
+        <td>
+          <span class="badge {{ 'badge-critical' if d.mode == 'vulnerable' else 'badge-ok' }}">
+            {{ d.mode or '—' }}
+          </span>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="empty">
+        배포 기록이 없습니다. CI/CD 파이프라인이 첫 배포를 하면 여기에 표시됩니다.
+      </td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+{% endblock %}

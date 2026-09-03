@@ -1,0 +1,109 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}시스템{% endblock %}
+{% block admin_title %}시스템 상태{% endblock %}
+
+{% block admin_content %}
+
+<section class="panel-row">
+  <article class="panel">
+    <header class="panel-head"><h2>애플리케이션</h2></header>
+    <dl class="info-list">
+      <dt>보안 모드</dt>
+      <dd>
+        <span class="badge {{ 'badge-critical' if is_vulnerable else 'badge-ok' }}">
+          {{ config.SECURITY_MODE }}
+        </span>
+      </dd>
+      <dt>버전</dt><dd>{{ config.APP_VERSION }}</dd>
+      <dt>커밋</dt><dd><code>{{ config.GIT_COMMIT[:12] if config.GIT_COMMIT else 'unknown' }}</code></dd>
+      <dt>배포 시각</dt><dd>{{ config.DEPLOYED_AT or '—' }}</dd>
+      <dt>세션 Secure 쿠키</dt>
+      <dd>{{ '켜짐' if config.SESSION_COOKIE_SECURE else '꺼짐 (HTTP 환경)' }}</dd>
+      <dt>업로드 제한</dt><dd>{{ (config.MAX_CONTENT_LENGTH / 1024 / 1024)|round(1) }} MB</dd>
+      <dt>신뢰 프록시 홉</dt><dd>{{ config.TRUSTED_PROXY_COUNT }}</dd>
+    </dl>
+  </article>
+
+  <article class="panel">
+    <header class="panel-head"><h2>데이터베이스</h2></header>
+    <dl class="info-list">
+      <dt>상태</dt>
+      <dd>
+        {% if db_health.ok %}<span class="badge badge-ok">정상</span>
+        {% else %}<span class="badge badge-critical">오류</span>{% endif %}
+      </dd>
+      <dt>응답 시간</dt><dd>{{ db_health.get('latency_ms', '—') }} ms</dd>
+      <dt>호스트</dt><dd class="mono">{{ config.DB_HOST }}:{{ config.DB_PORT }}</dd>
+      <dt>데이터베이스</dt><dd class="mono">{{ config.DB_NAME }}</dd>
+      <dt>커넥션 풀</dt><dd>{{ config.DB_POOL_SIZE }}</dd>
+      {% if not db_health.ok %}
+      <dt>오류 내용</dt><dd class="text-danger small">{{ db_health.get('error') }}</dd>
+      {% endif %}
+    </dl>
+  </article>
+
+  <article class="panel">
+    <header class="panel-head"><h2>로그 수집기</h2></header>
+    <dl class="info-list">
+      <dt>워커 상태</dt>
+      <dd>
+        {% if log_writer.alive %}<span class="badge badge-ok">동작 중</span>
+        {% else %}<span class="badge badge-high">중지</span>{% endif %}
+      </dd>
+      <dt>대기 큐</dt><dd>{{ log_writer.queue_size }}</dd>
+      <dt>유실 건수</dt>
+      <dd class="{{ 'text-warn' if log_writer.dropped }}">{{ log_writer.dropped }}</dd>
+      <dt>총 로그 수</dt><dd>{{ '{:,}'.format(log_count or 0) }}</dd>
+      <dt>가장 오래된 로그</dt>
+      <dd class="mono small">
+        {{ oldest_log.strftime('%Y-%m-%d %H:%M') if oldest_log else '—' }}
+      </dd>
+      <dt>보존 기간</dt><dd>{{ config.ACCESS_LOG_RETENTION_DAYS }}일</dd>
+    </dl>
+  </article>
+</section>
+
+<section class="panel">
+  <header class="panel-head"><h2>테이블 사용량</h2></header>
+  <table class="data-table">
+    <thead>
+      <tr><th>테이블</th><th class="num">행 수 (추정)</th><th class="num">크기 (MB)</th></tr>
+    </thead>
+    <tbody>
+    {% for t in table_sizes %}
+      <tr>
+        <td class="mono">{{ t.name }}</td>
+        <td class="num">{{ '{:,}'.format(t.row_count or 0) }}</td>
+        <td class="num">{{ t.size_mb }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+<section class="panel panel-alert">
+  <header class="panel-head"><h2>로그 정리</h2></header>
+  <p class="small">
+    개인정보 최소 보관 원칙에 따라 보존 기간
+    ({{ config.ACCESS_LOG_RETENTION_DAYS }}일)이 지난 접속 로그를 삭제합니다.
+    접속 로그에는 IP 주소가 포함되어 개인정보로 취급될 수 있습니다.
+  </p>
+  <form method="post" action="{{ url_for('admin.purge_logs') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <button type="submit" class="btn btn-danger btn-sm">
+      {{ config.ACCESS_LOG_RETENTION_DAYS }}일 이전 로그 삭제
+    </button>
+  </form>
+</section>
+
+<section class="panel">
+  <header class="panel-head"><h2>헬스체크 엔드포인트</h2></header>
+  <p class="small">
+    Docker healthcheck 와 CI/CD 배포 검증이 사용합니다:
+    <code>GET /healthz</code>
+  </p>
+  <p><a href="{{ url_for('healthz') }}" class="btn btn-ghost btn-sm" target="_blank"
+        rel="noopener">/healthz 열기</a></p>
+</section>
+
+{% endblock %}

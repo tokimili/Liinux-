@@ -1,0 +1,297 @@
+/* ==========================================================================
+   VM Security Lab — 관리자 대시보드 스타일
+   app.css 를 먼저 로드한 뒤 이 파일을 덧붙인다.
+   ========================================================================== */
+
+/* ----------------------------------------------------------- 대시보드 셸 */
+.admin-shell {
+  display: grid;
+  grid-template-columns: 216px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+@media (max-width: 1000px) {
+  .admin-shell { grid-template-columns: 1fr; }
+}
+
+/* ----------------------------------------------------------- 사이드바 */
+#admin-sidebar {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px 12px;
+  position: sticky;
+  top: 74px;
+}
+@media (max-width: 1000px) {
+  #admin-sidebar { position: static; }
+}
+.sidebar-title {
+  font-size: .72rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-mute);
+  margin: 2px 0 10px 8px;
+}
+.sidebar-nav { display: flex; flex-direction: column; gap: 2px; }
+@media (max-width: 1000px) {
+  .sidebar-nav { flex-direction: row; flex-wrap: wrap; }
+}
+.sidebar-nav a {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 11px;
+  border-radius: var(--radius-sm);
+  color: var(--text-dim);
+  font-size: .87rem;
+  border-left: 2px solid transparent;
+}
+.sidebar-nav a:hover {
+  background: var(--panel-2);
+  color: var(--text);
+  text-decoration: none;
+}
+.sidebar-nav a.active {
+  background: rgba(79,140,255,.13);
+  border-left-color: var(--accent);
+  color: #cfe0ff;
+  font-weight: 600;
+}
+.sidebar-nav .ico {
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  font-size: .9rem;
+  opacity: .8;
+}
+
+/* ----------------------------------------------------------- 본문 헤더 */
+#admin-main { min-width: 0; } /* grid 자식이 표 때문에 넘치지 않게 */
+
+.admin-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+}
+.admin-head h1 { margin: 0; font-size: 1.35rem; }
+.admin-head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  flex-wrap: wrap;
+}
+
+/* ----------------------------------------------------------- KPI 카드 */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(158px, 1fr));
+  gap: 12px;
+  margin-bottom: var(--gap);
+}
+.kpi-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 13px 15px;
+  position: relative;
+  overflow: hidden;
+}
+.kpi-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: var(--border);
+}
+.kpi-card h3 {
+  font-size: .73rem;
+  font-weight: 650;
+  color: var(--text-mute);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  margin: 0 0 5px;
+}
+.kpi-value {
+  font-size: 1.62rem;
+  font-weight: 700;
+  line-height: 1.1;
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+.kpi-value small { font-size: .58em; font-weight: 500; color: var(--text-mute); margin-left: 2px; }
+.kpi-sub { margin: 4px 0 0; font-size: .74rem; color: var(--text-mute); }
+
+.kpi-card.kpi-warn::before   { background: var(--warn); }
+.kpi-card.kpi-warn .kpi-value { color: #fbc06a; }
+.kpi-card.kpi-danger::before { background: var(--critical); }
+.kpi-card.kpi-danger .kpi-value { color: #ff8a95; }
+
+/* ----------------------------------------------------------- 차트 */
+.chart-row {
+  display: grid;
+  grid-template-columns: 1.9fr 1fr;
+  gap: var(--gap);
+  margin-bottom: var(--gap);
+}
+@media (max-width: 960px) {
+  .chart-row { grid-template-columns: 1fr; }
+}
+.chart-box {
+  position: relative;
+  height: 268px;
+  width: 100%;
+}
+.chart-box-sm { height: 230px; }
+.chart-box canvas { max-width: 100%; }
+
+/* 데이터 로딩 실패 시 안내 (dashboard.js 가 삽입) */
+.chart-error {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: var(--text-mute);
+  font-size: .84rem;
+  text-align: center;
+}
+
+/* ----------------------------------------------------------- 패널 배치 */
+.panel-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--gap);
+  margin-bottom: var(--gap);
+}
+@media (max-width: 960px) {
+  .panel-row { grid-template-columns: 1fr; }
+}
+.panel-wide { min-width: 0; }
+
+.panel-alert {
+  border-color: #6b2630;
+  background: linear-gradient(180deg, rgba(217,38,56,.10), var(--panel));
+}
+
+/* ----------------------------------------------------------- 필터 패널 */
+.filter-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 15px 17px;
+  margin-bottom: var(--gap);
+}
+.filter-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 11px 13px;
+}
+.filter-grid .field { margin: 0; }
+.filter-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 13px;
+  padding-top: 13px;
+  border-top: 1px solid var(--border-soft);
+  flex-wrap: wrap;
+}
+.result-count { margin-left: auto; font-size: .82rem; color: var(--text-mute); }
+
+/* ----------------------------------------------------------- 심각도 요약 */
+.severity-summary {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: var(--gap);
+}
+.severity-summary .sev {
+  flex: 1 1 130px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  padding: 11px 13px;
+}
+.severity-summary .sev strong {
+  display: block;
+  font-size: 1.4rem;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+.severity-summary .sev span {
+  font-size: .74rem;
+  color: var(--text-mute);
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.severity-summary .sev-low      { border-left-color: var(--info); }
+.severity-summary .sev-medium   { border-left-color: var(--warn); }
+.severity-summary .sev-high     { border-left-color: #ef783c; }
+.severity-summary .sev-critical { border-left-color: var(--critical); }
+
+/* ----------------------------------------------------------- 상세 셀 */
+.detail-cell {
+  max-width: 380px;
+  font-size: .8rem;
+  color: var(--text-dim);
+  word-break: break-word;
+}
+.detail-cell pre {
+  margin: 0;
+  padding: 8px 10px;
+  font-size: .74rem;
+  max-height: 130px;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+/* ----------------------------------------------------------- IP 차단 폼 */
+.block-form {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+}
+.block-form .field { margin: 0; }
+.block-form input[type="text"] { min-width: 160px; }
+
+/* ----------------------------------------------------------- 실시간 표시 */
+#live-log-body tr.row-new {
+  animation: rowFlash 1.4s ease-out;
+}
+@keyframes rowFlash {
+  from { background: rgba(79,140,255,.28); }
+  to   { background: transparent; }
+}
+
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .76rem;
+  color: var(--text-mute);
+}
+.live-indicator::before {
+  content: "";
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--ok);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .25; }
+}
+
+/* ----------------------------------------------------------- 관리자 표 보정 */
+#admin-main .data-table { min-width: 100%; }
+#admin-main .panel { overflow-x: auto; }
+#admin-main .truncate { max-width: 220px; }
+
+@media (max-width: 700px) {
+  .kpi-grid { grid-template-columns: repeat(2, 1fr); }
+  .admin-head h1 { font-size: 1.15rem; }
+}

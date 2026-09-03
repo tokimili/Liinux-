@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}VM Lab{% endblock %} · 로컬 VM 보안 실습</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+  {% block head %}{% endblock %}
+</head>
+<body>
+
+{% if is_vulnerable %}
+<aside id="vuln-banner" role="alert">
+  <strong>⚠️ VULNERABLE MODE</strong>
+  의도적 취약점이 활성화되어 있습니다. 격리된 사설 네트워크에서만 사용하세요.
+</aside>
+{% endif %}
+
+<header id="site-header">
+  <div class="container header-inner">
+    <a href="{{ url_for('main.index') }}" class="brand">
+      <span class="brand-mark">VM</span>
+      <span class="brand-text">Security Lab</span>
+    </a>
+
+    <nav id="main-nav" aria-label="주 메뉴">
+      <a href="{{ url_for('main.index') }}">홈</a>
+      <a href="{{ url_for('board.list_posts') }}">게시판</a>
+      <a href="{{ url_for('main.about') }}">아키텍처</a>
+      {% if current_user and current_user.role == 'admin' %}
+        <a href="{{ url_for('admin.dashboard') }}" class="nav-admin">대시보드</a>
+      {% endif %}
+    </nav>
+
+    <div class="header-actions">
+      {% if current_user %}
+        <span class="user-chip">
+          {{ current_user.username }}
+          {% if current_user.role == 'admin' %}<em>admin</em>{% endif %}
+        </span>
+        <a href="{{ url_for('auth.logout') }}" class="btn btn-ghost btn-sm">로그아웃</a>
+      {% else %}
+        <a href="{{ url_for('auth.login') }}" class="btn btn-ghost btn-sm">로그인</a>
+        <a href="{{ url_for('auth.register') }}" class="btn btn-primary btn-sm">회원가입</a>
+      {% endif %}
+    </div>
+  </div>
+</header>
+
+<main id="main-content" class="container">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      <div id="flash-area">
+        {% for category, message in messages %}
+          <div class="flash flash-{{ category }}" role="status">{{ message }}</div>
+        {% endfor %}
+      </div>
+    {% endif %}
+  {% endwith %}
+
+  {% block content %}{% endblock %}
+</main>
+
+<footer id="site-footer">
+  <div class="container footer-inner">
+    <div>
+      <strong>로컬 VM 보안 실습 포트폴리오</strong>
+      <p class="muted">Ubuntu VM · Docker · Nginx · Gunicorn · MariaDB</p>
+    </div>
+    <dl class="build-info">
+      <dt>모드</dt>
+      <dd class="{{ 'mode-vuln' if is_vulnerable else 'mode-secure' }}">{{ security_mode }}</dd>
+      <dt>버전</dt><dd>{{ app_version }}</dd>
+      <dt>커밋</dt><dd><code>{{ git_commit or 'unknown' }}</code></dd>
+    </dl>
+  </div>
+</footer>
+
+{% block scripts %}{% endblock %}
+</body>
+</html>

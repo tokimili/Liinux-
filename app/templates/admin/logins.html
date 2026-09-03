@@ -1,0 +1,93 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}로그인 시도{% endblock %}
+{% block admin_title %}로그인 시도 기록{% endblock %}
+
+{% block admin_content %}
+
+{% if suspects %}
+<section class="panel panel-alert">
+  <header class="panel-head">
+    <h2>⚠ 브루트포스 의심 IP (최근 24시간, 실패 5회 이상)</h2>
+  </header>
+  <table class="data-table">
+    <thead>
+      <tr><th>IP</th><th class="num">실패 횟수</th><th class="num">시도한 계정 수</th>
+          <th>마지막 시도</th><th>조치</th></tr>
+    </thead>
+    <tbody>
+    {% for s in suspects %}
+      <tr>
+        <td class="mono"><a href="{{ url_for('admin.logins', ip=s.ip) }}">{{ s.ip }}</a></td>
+        <td class="num"><span class="badge badge-critical">{{ s.fails }}</span></td>
+        <td class="num">{{ s.accounts }}</td>
+        <td class="mono small">{{ s.last_try.strftime('%m-%d %H:%M:%S') if s.last_try }}</td>
+        <td>
+          <form method="post" action="{{ url_for('admin.block_ip') }}" class="inline-form">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="ip" value="{{ s.ip }}">
+            <input type="hidden" name="reason"
+                   value="브루트포스 의심 (실패 {{ s.fails }}회, 계정 {{ s.accounts }}개)">
+            <button type="submit" class="btn btn-danger btn-xs">IP 차단</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<form method="get" class="filter-panel">
+  <div class="filter-grid">
+    <div class="field">
+      <label for="f-ip">IP</label>
+      <input type="text" id="f-ip" name="ip" value="{{ filters.get('ip','') }}" autocomplete="off">
+    </div>
+    <div class="field field-check">
+      <label>
+        <input type="checkbox" name="failed" value="1"
+               {{ 'checked' if filters.get('failed') == '1' }}>
+        실패만 보기
+      </label>
+    </div>
+  </div>
+  <div class="filter-actions">
+    <button type="submit" class="btn btn-primary btn-sm">조회</button>
+    <a href="{{ url_for('admin.logins') }}" class="btn btn-ghost btn-sm">초기화</a>
+    <span class="result-count">총 <strong>{{ '{:,}'.format(total or 0) }}</strong>건</span>
+  </div>
+</form>
+
+<section class="panel">
+  <table class="data-table table-compact">
+    <thead>
+      <tr><th>시각</th><th>IP</th><th>계정</th><th>결과</th>
+          <th>사유</th><th>User-Agent</th></tr>
+    </thead>
+    <tbody>
+    {% for r in rows %}
+      <tr class="{{ 'row-threat' if not r.success }}">
+        <td class="mono small nowrap">{{ r.ts.strftime('%m-%d %H:%M:%S') if r.ts }}</td>
+        <td class="mono small">
+          <a href="{{ url_for('admin.logs', ip=r.ip) }}">{{ r.ip }}</a>
+        </td>
+        <td class="mono small">{{ r.username }}</td>
+        <td>
+          {% if r.success %}<span class="badge badge-ok">성공</span>
+          {% else %}<span class="badge badge-high">실패</span>{% endif %}
+        </td>
+        <td class="small mono">{{ r.reason or '—' }}</td>
+        <td class="small truncate" title="{{ r.user_agent or '' }}">
+          {{ (r.user_agent or '—')[:50] }}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="6" class="empty">로그인 시도 기록이 없습니다.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% include "admin/_pagination.html" %}
+
+{% endblock %}

@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="admin-shell">
+
+  <aside id="admin-sidebar" aria-label="관리 메뉴">
+    <h2 class="sidebar-title">관리자</h2>
+    <nav class="sidebar-nav">
+      <a href="{{ url_for('admin.dashboard') }}"
+         class="{{ 'active' if request.endpoint == 'admin.dashboard' }}">
+        <span class="ico">▤</span> 대시보드
+      </a>
+      <a href="{{ url_for('admin.logs') }}"
+         class="{{ 'active' if request.endpoint == 'admin.logs' }}">
+        <span class="ico">≡</span> 접속 로그
+      </a>
+      <a href="{{ url_for('admin.threats') }}"
+         class="{{ 'active' if request.endpoint == 'admin.threats' }}">
+        <span class="ico">⚠</span> 보안 이벤트
+      </a>
+      <a href="{{ url_for('admin.logins') }}"
+         class="{{ 'active' if request.endpoint == 'admin.logins' }}">
+        <span class="ico">⚿</span> 로그인 시도
+      </a>
+      <a href="{{ url_for('admin.ips') }}"
+         class="{{ 'active' if request.endpoint == 'admin.ips' }}">
+        <span class="ico">◉</span> IP 분석
+      </a>
+      <a href="{{ url_for('admin.deployments') }}"
+         class="{{ 'active' if request.endpoint == 'admin.deployments' }}">
+        <span class="ico">⇧</span> 배포 이력
+      </a>
+      <a href="{{ url_for('admin.system') }}"
+         class="{{ 'active' if request.endpoint == 'admin.system' }}">
+        <span class="ico">⚙</span> 시스템
+      </a>
+    </nav>
+  </aside>
+
+  <section id="admin-main">
+    <div class="admin-head">
+      <h1>{% block admin_title %}관리자{% endblock %}</h1>
+      <div class="admin-head-actions">{% block admin_actions %}{% endblock %}</div>
+    </div>
+    {% block admin_content %}{% endblock %}
+  </section>
+
+</div>
+{% endblock %}

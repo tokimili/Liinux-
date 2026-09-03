@@ -1,0 +1,93 @@
+{% extends "admin/base_admin.html" %}
+{% block title %}보안 이벤트{% endblock %}
+{% block admin_title %}보안 이벤트 (공격 탐지 내역){% endblock %}
+
+{% block admin_content %}
+
+<section class="severity-summary" aria-label="심각도별 미처리 건수">
+  {% set sev_map = {} %}
+  {% for s in summary %}{% set _ = sev_map.update({s.severity: s.cnt}) %}{% endfor %}
+  {% for sev, label in [('critical','치명적'),('high','높음'),('medium','보통'),('low','낮음'),('info','정보')] %}
+    <a href="{{ url_for('admin.threats', severity=sev) }}" class="sev-chip sev-{{ sev }}">
+      <strong>{{ sev_map.get(sev, 0) }}</strong>
+      <span>{{ label }}</span>
+    </a>
+  {% endfor %}
+</section>
+
+<form method="get" class="filter-panel">
+  <div class="filter-grid">
+    <div class="field">
+      <label for="f-sev">심각도</label>
+      <select id="f-sev" name="severity">
+        <option value="">전체</option>
+        {% for s in ['critical','high','medium','low','info'] %}
+          <option value="{{ s }}" {{ 'selected' if filters.get('severity') == s }}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="f-type">이벤트 유형</label>
+      <input type="text" id="f-type" name="type" value="{{ filters.get('type','') }}"
+             placeholder="sqli_attempt" autocomplete="off">
+    </div>
+    <div class="field field-check">
+      <label>
+        <input type="checkbox" name="resolved" value="1"
+               {{ 'checked' if filters.get('resolved') == '1' }}>
+        처리 완료 포함
+      </label>
+    </div>
+  </div>
+  <div class="filter-actions">
+    <button type="submit" class="btn btn-primary btn-sm">조회</button>
+    <a href="{{ url_for('admin.threats') }}" class="btn btn-ghost btn-sm">초기화</a>
+    <span class="result-count">총 <strong>{{ '{:,}'.format(total or 0) }}</strong>건</span>
+  </div>
+</form>
+
+<section class="panel">
+  <table class="data-table">
+    <thead>
+      <tr><th>시각</th><th>심각도</th><th>유형</th><th>IP</th>
+          <th>경로</th><th>상세</th><th>상태</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for e in rows %}
+      <tr class="{{ 'row-resolved' if e.is_resolved }}">
+        <td class="mono small nowrap">{{ e.ts.strftime('%m-%d %H:%M:%S') if e.ts }}</td>
+        <td><span class="badge badge-{{ e.severity }}">{{ e.severity }}</span></td>
+        <td class="mono small">{{ e.event_type }}</td>
+        <td class="mono small">
+          {% if e.ip %}<a href="{{ url_for('admin.logs', ip=e.ip) }}">{{ e.ip }}</a>
+          {% else %}—{% endif %}
+        </td>
+        <td class="mono small truncate" title="{{ e.path }}">{{ e.path or '—' }}</td>
+        <td class="small detail-cell">
+          <pre>{{ e.detail or '' }}</pre>
+        </td>
+        <td class="small">
+          {% if e.is_resolved %}<span class="badge badge-ok">처리됨</span>
+          {% else %}<span class="badge badge-open">미처리</span>{% endif %}
+        </td>
+        <td>
+          {% if not e.is_resolved %}
+          <form method="post" action="{{ url_for('admin.resolve_threat', event_id=e.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-ghost btn-xs">처리</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="empty">
+        탐지된 보안 이벤트가 없습니다. 좋은 신호입니다.
+      </td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% include "admin/_pagination.html" %}
+
+{% endblock %}

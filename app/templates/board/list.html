@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% block title %}게시판{% endblock %}
+
+{% block content %}
+<section id="board-section">
+  <header class="page-head">
+    <h1>게시판</h1>
+    <div class="page-head-actions">
+      {% if current_user %}
+        <a href="{{ url_for('board.create_post') }}" class="btn btn-primary btn-sm">글쓰기</a>
+      {% else %}
+        <a href="{{ url_for('auth.login', next=url_for('board.create_post')) }}"
+           class="btn btn-ghost btn-sm">로그인 후 글쓰기</a>
+      {% endif %}
+    </div>
+  </header>
+
+  <form method="get" action="{{ url_for('board.list_posts') }}" id="board-search" class="search-bar">
+    <label for="search-input" class="sr-only">검색어</label>
+    <input type="text" id="search-input" name="q" value="{{ keyword or '' }}"
+           placeholder="제목 또는 내용 검색" maxlength="100" autocomplete="off">
+    <button type="submit" class="btn btn-primary btn-sm">검색</button>
+    {% if keyword %}
+      <a href="{{ url_for('board.list_posts') }}" class="btn btn-ghost btn-sm">초기화</a>
+    {% endif %}
+  </form>
+
+  {% if is_vulnerable %}
+  <p class="callout callout-danger">
+    <strong>vulnerable 모드:</strong> 검색 파라미터가 SQL Injection(VULN-02)에
+    취약합니다. 실습 예시 —
+    <code>' UNION SELECT 1,username,1,now(),password_hash FROM users -- </code>
+  </p>
+  {% endif %}
+
+  {% if keyword %}
+    <p class="result-note">
+      <strong>"{{ keyword }}"</strong> 검색 결과 {{ total or 0 }}건
+    </p>
+  {% endif %}
+
+  <table class="data-table board-table" id="post-table">
+    <thead>
+      <tr>
+        <th class="col-id num">번호</th>
+        <th>제목</th>
+        <th class="col-author">작성자</th>
+        <th class="col-views num">조회</th>
+        <th class="col-date">작성일</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for p in posts %}
+      <tr>
+        <td class="num muted">{{ p.id }}</td>
+        <td class="col-title">
+          <a href="{{ url_for('board.view_post', post_id=p.id) }}">{{ p.title }}</a>
+        </td>
+        <td class="col-author">{{ p.username }}</td>
+        <td class="num">{{ p.view_count }}</td>
+        <td class="col-date mono small">
+          {{ p.created_at.strftime('%Y-%m-%d %H:%M') if p.created_at else '—' }}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="empty">
+        {% if keyword %}검색 결과가 없습니다.{% else %}등록된 게시글이 없습니다.{% endif %}
+      </td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+
+  {% if total_pages and total_pages > 1 %}
+  <nav class="pagination" aria-label="페이지 이동">
+    {% if page > 1 %}
+      <a href="{{ url_for('board.list_posts', page=page-1, q=keyword or None) }}"
+         class="page-link">‹ 이전</a>
+    {% endif %}
+
+    {% set start = [1, page - 2]|max %}
+    {% set end = [total_pages, page + 2]|min %}
+    {% for n in range(start, end + 1) %}
+      {% if n == page %}
+        <span class="page-link current" aria-current="page">{{ n }}</span>
+      {% else %}
+        <a href="{{ url_for('board.list_posts', page=n, q=keyword or None) }}"
+           class="page-link">{{ n }}</a>
+      {% endif %}
+    {% endfor %}
+
+    {% if page < total_pages %}
+      <a href="{{ url_for('board.list_posts', page=page+1, q=keyword or None) }}"
+         class="page-link">다음 ›</a>
+    {% endif %}
+  </nav>
+  {% endif %}
+</section>
+{% endblock %}
