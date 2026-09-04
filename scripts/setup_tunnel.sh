@@ -52,15 +52,20 @@ esac
 command -v docker >/dev/null 2>&1 || die "docker 가 없습니다. vm_bootstrap.sh 를 먼저 실행하세요."
 
 # 실행 중인 터널 컨테이너 이름을 찾는다 (named 든 quick 이든)
+# ★ `|| true` 필수: 터널이 안 떠 있으면 grep 이 1 을 반환하고,
+#   호출부의 `NAME="$(running_tunnel)"` 대입문이 그 종료코드를 물려받아
+#   set -e 가 스크립트를 죽인다. "아직 안 켜진 상태" 는 정상이지 에러가 아니다.
 running_tunnel() {
   docker ps --format '{{.Names}}' 2>/dev/null \
-    | grep -E '^vmlab-(tunnel|quicktunnel)$' | head -1
+    | grep -E '^vmlab-(tunnel|quicktunnel)$' | head -1 || true
 }
 
 # quick 터널이 발급한 주소를 로그에서 뽑아낸다
+# `|| true` 필수: 주소 발급 전에는 로그에 URL 이 없어 grep 이 1 을 낸다.
+# 발급 대기 루프가 바로 이 "아직 없음" 상태를 기대하고 도는 구조다.
 quick_url() {
   docker logs vmlab-quicktunnel 2>&1 \
-    | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1
+    | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true
 }
 
 # --------------------------------------------------------------------------
@@ -115,7 +120,10 @@ step "안전 점검 — secure 모드 확인"
 
 # .env 를 source 하지 않는 이유: 값에 특수문자가 있으면 셸이 해석해버린다.
 # 필요한 키만 문자열로 뽑아 쓴다.
-env_get() { grep -E "^${1}=" .env | tail -1 | cut -d= -f2- ; }
+# `|| true` 필수: 해당 키가 .env 에 아직 없으면 grep 이 1 을 낸다.
+# 호출부는 빈 문자열을 받아 안내 메시지를 띄우도록 설계돼 있는데,
+# 그 안내에 도달하기 전에 스크립트가 죽어버린다 (TOKEN 미설정이 정확히 이 경우).
+env_get() { grep -E "^${1}=" .env 2>/dev/null | tail -1 | cut -d= -f2- || true ; }
 
 MODE="$(env_get SECURITY_MODE)"
 echo "  현재 SECURITY_MODE = ${MODE:-(미설정)}"

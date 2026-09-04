@@ -30,6 +30,20 @@ ok()   { printf '%s  [OK]%s %s\n'   "${C_OK}"   "${C_OFF}" "$*"; }
 warn() { printf '%s  [!]%s %s\n'    "${C_WARN}" "${C_OFF}" "$*"; }
 die()  { printf '%s  [에러]%s %s\n' "${C_ERR}"  "${C_OFF}" "$*" >&2; exit 1; }
 
+# ★ ERR 트랩 — 이게 없으면 set -e 로 죽을 때 아무 메시지도 안 나온다.
+#   실제로 이 스크립트는 ufw 단계에서 조용히 종료됐고, 그 결과 사용자는
+#   "설치가 끝났다"고 오해한 채 fail2ban / sysctl 하드닝이 전혀 적용되지
+#   않은 VM 을 그대로 쓰게 됐다. 실패는 반드시 시끄러워야 한다.
+on_err() {
+    local rc=$1 line=$2 cmd=$3
+    printf '\n%s[중단]%s %d번째 줄에서 실패 (종료코드 %d)\n' \
+        "${C_ERR}" "${C_OFF}" "${line}" "${rc}" >&2
+    printf '%s        실패한 명령:%s %s\n' "${C_ERR}" "${C_OFF}" "${cmd}" >&2
+    printf '%s        이 스크립트는 멱등성이 있어 고친 뒤 다시 실행해도 안전합니다.%s\n\n' \
+        "${C_WARN}" "${C_OFF}" >&2
+}
+trap 'on_err "$?" "${LINENO}" "${BASH_COMMAND}"' ERR
+
 # ---------------------------------------------------------------- 사전 점검
 [[ "${EUID}" -eq 0 ]] || die "root 권한이 필요합니다:  sudo $0"
 
@@ -160,8 +174,23 @@ ufw --force default deny incoming >/dev/null
 ufw --force default allow outgoing >/dev/null
 
 # SSH 는 반드시 먼저 허용한다. 이 순서를 틀리면 원격 접속이 끊긴다.
-SSH_PORT="$(grep -oP '^\s*Port\s+\K[0-9]+' /etc/ssh/sshd_config 2>/dev/null | head -1)"
+#
+# ★ `|| true` 가 반드시 필요하다 (없으면 스크립트가 여기서 죽는다):
+#   sshd_config 의 Port 줄은 기본값이 `#Port 22` 로 **주석 처리**돼 있다.
+#   그러면 grep 이 아무것도 못 찾아 종료코드 1 을 내고, pipefail 때문에
+#   파이프 전체가 1 이 되며, set -e 가 스크립트를 즉시 종료시킨다.
+#   `SSH_PORT="${SSH_PORT:-22}"` 폴백은 그 다음 줄이라 실행될 기회조차 없다.
+#   ─ Ubuntu 26.04 VM 에서 실제로 이 지점에서 조용히 중단됐다.
+#
+# Ubuntu 22.10+ 는 sshd_config.d/*.conf 로도 포트를 덮어쓸 수 있으므로
+# 그쪽까지 함께 훑는다.
+SSH_PORT="$(grep -hoP '^\s*Port\s+\K[0-9]+' \
+                /etc/ssh/sshd_config \
+                /etc/ssh/sshd_config.d/*.conf 2>/dev/null \
+             | tail -1 || true)"
 SSH_PORT="${SSH_PORT:-22}"
+[[ "${SSH_PORT}" == "22" ]] \
+    && echo "  sshd_config 에 명시적 Port 설정이 없어 기본값 22 를 사용합니다"
 ufw allow "${SSH_PORT}"/tcp comment 'SSH' >/dev/null
 ok "SSH(${SSH_PORT}/tcp) 허용"
 
