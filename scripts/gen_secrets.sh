@@ -92,14 +92,61 @@ echo
 # gh CLI 자동 등록
 # --------------------------------------------------------------------------
 if [[ ${USE_GH} -eq 1 ]]; then
-  command -v gh >/dev/null 2>&1 || die "gh CLI 가 없습니다. https://cli.github.com 에서 설치하세요."
-  gh auth status >/dev/null 2>&1 || die "gh 인증이 안 되어 있습니다. 'gh auth login' 먼저 실행하세요."
+  # gh CLI 는 vm_bootstrap.sh 가 설치하지 않는다(배포 자체에는 불필요하고,
+  # 러너는 GitHub 가 직접 인증하므로). --gh 를 쓸 때만 필요하다.
+  # 그래서 "설치하세요" 로 끝내지 않고 실행할 명령을 그대로 준다.
+  if ! command -v gh >/dev/null 2>&1; then
+    cat <<'GUIDE' >&2
+
+gh CLI 가 설치되어 있지 않습니다.
+
+  [A] gh 를 설치해서 자동 등록하기 (명령 3줄)
+
+      sudo apt update && sudo apt install -y gh
+      gh auth login          # GitHub -> HTTPS -> 브라우저 로그인(코드 입력)
+      ./scripts/gen_secrets.sh --gh
+
+      * apt 에 gh 가 없다고 나오면 공식 저장소를 추가하세요:
+        sudo mkdir -p -m 755 /etc/apt/keyrings
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+          | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+        sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+          | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+        sudo apt update && sudo apt install -y gh
+
+  [B] 설치 없이 웹 UI 로 직접 등록하기 (--gh 없이 실행)
+
+      ./scripts/gen_secrets.sh
+
+      출력된 값을 GitHub 저장소 ->
+      Settings -> Secrets and variables -> Actions -> New repository secret
+      에 하나씩 붙여넣으면 됩니다. 결과는 [A] 와 동일합니다.
+
+GUIDE
+    die "위 [A] 또는 [B] 중 하나를 선택하세요."
+  fi
+  gh auth status >/dev/null 2>&1 || \
+    die "gh 인증이 안 되어 있습니다. 먼저 실행:  gh auth login"
 
   info "gh CLI 로 Secrets 등록 중..."
+
+  # ★ 실패를 반드시 집계한다.
+  #   초기 버전은 실패해도 warn 만 찍고 종료코드 0 으로 "다음 단계" 를
+  #   안내했다. 토큰 권한이 부족하면 7개가 전부 403 으로 실패하는데도
+  #   성공한 것처럼 보여, 배포가 빈 .env 로 돌다가 DB 접속 실패로
+  #   죽은 뒤에야 원인을 찾게 된다.
+  GH_FAIL=0
+  GH_LAST_ERR=""
   set_secret() {
-    printf '%s' "$2" | gh secret set "$1" --body - >/dev/null \
-      && ok "$1 등록됨" \
-      || warn "$1 등록 실패"
+    local out
+    if out="$(printf '%s' "$2" | gh secret set "$1" --body - 2>&1)"; then
+      ok "$1 등록됨"
+    else
+      warn "$1 등록 실패"
+      GH_FAIL=$((GH_FAIL + 1))
+      GH_LAST_ERR="${out}"
+    fi
   }
   set_secret SECRET_KEY             "${SECRET_KEY}"
   set_secret DB_NAME                "${DB_NAME}"
@@ -108,6 +155,32 @@ if [[ ${USE_GH} -eq 1 ]]; then
   set_secret MYSQL_ROOT_PASSWORD    "${MYSQL_ROOT_PASSWORD}"
   set_secret ADMIN_USERNAME         "${ADMIN_USERNAME}"
   set_secret ADMIN_INITIAL_PASSWORD "${ADMIN_INITIAL_PASSWORD}"
+
+  if [[ ${GH_FAIL} -gt 0 ]]; then
+    echo >&2
+    warn "${GH_FAIL}개 등록에 실패했습니다. 마지막 오류:"
+    printf '    %s\n' "${GH_LAST_ERR}" >&2
+    echo >&2
+    if [[ "${GH_LAST_ERR}" == *"Resource not accessible by integration"* ]] \
+    || [[ "${GH_LAST_ERR}" == *"403"* ]]; then
+      cat <<'GUIDE' >&2
+원인: 지금 gh 가 쓰는 토큰에 Secrets 쓰기 권한이 없습니다.
+      (GitHub App 토큰은 Actions Secrets 를 건드릴 수 없습니다.)
+
+해결: 본인 계정으로 다시 인증하거나, 웹 UI 로 등록하세요.
+
+  [A] 본인 계정으로 재인증
+      gh auth login          # GitHub.com -> HTTPS -> 브라우저 로그인
+      ./scripts/gen_secrets.sh --gh
+
+  [B] 웹 UI 로 등록 (권한 문제 없음)
+      ./scripts/gen_secrets.sh        # --gh 없이 실행하면 값만 출력
+      -> Settings -> Secrets and variables -> Actions -> New repository secret
+
+GUIDE
+    fi
+    die "Secrets 등록이 완료되지 않았습니다. 위 안내대로 처리한 뒤 다시 실행하세요."
+  fi
   echo
   warn "CLOUDFLARE_TUNNEL_TOKEN 은 자동 등록할 수 없습니다 (Cloudflare 발급값)."
   warn "  ./scripts/setup_tunnel.sh 로 발급받은 뒤 아래처럼 등록하세요:"
