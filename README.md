@@ -120,6 +120,23 @@ HTTPS 는 터널이 자동 적용합니다. **공유기 포트를 하나도 열�
 nginx 가 `CF-Connecting-IP` 를 전달하고 앱이 그것을 우선 읽기 때문입니다.
 이게 없다면 대시보드에 모든 접속이 Cloudflare IP 하나로 보여 무용해집니다.
 
+**IPv6 도 정상 처리됩니다.** 휴대폰 LTE 접속이 실제로 IPv6 로 들어왔고,
+IPv4 전제로 깨지기 쉬운 지점을 전부 실측했습니다.
+
+```
+저장    ip VARCHAR(45)  ← IPv6 최대 표기 길이가 정확히 45자
+        (ffff:ffff:ffff:ffff:ffff:ffff:255.255.255.255)
+        휴대폰 IPv6 는 37자 → 절단 없이 그대로 저장됨
+검증    _is_valid_ip() 가 ipaddress.ip_address() 사용 → v4/v6 무관
+로그검색 /admin/logs?ip=<IPv6>          → 200, 해당 행만 정확히 필터
+집계    /admin/ips                      → IPv6 별로 정상 집계
+차단    POST /admin/ips/block  ip[:45]  → 302, 목록 등록 확인
+해제    POST /admin/ips/unblock         → 302, 목록에서 제거 확인
+```
+
+차단/해제 테스트는 RFC3849 문서용 예약 대역(`2001:db8::/32`)으로 수행하고
+검증 후 원상복구했습니다. 사용자 실제 IP 는 건드리지 않았습니다.
+
 ### 방어 동작 (터널 경유 실측, secure 모드)
 
 ```
@@ -255,6 +272,8 @@ CSP `script-src 'self'` 를 엄격히 유지하고, 오프라인 VM 에서도 �
 | `Conflict. container name "/vmlab-db"` | 같은 원인. 실행 중인 `vmlab` 스택이 안 보여 새로 만들려 듦 |
 | 브라우저에서 `127.0.0.1:8080` 거부 | `127.0.0.1` 은 **머신마다 다르다**. `BIND_ADDR=127.0.0.1` 은 VM 내부 전용 (의도된 설정) |
 | 비밀번호는 맞는데 로그인이 안 됨 | `SESSION_COOKIE_SECURE=true` + `http://` → 브라우저가 쿠키를 안 보냄. HTTPS(터널)로 접속 |
+| `setup_tunnel.sh` 가 `.env` 를 못 찾음 | `.env` 는 `git clone` 한 `~/Liinux-` 가 아니라 **러너 작업 디렉터리**(`/opt/actions-runner/_work/...`)에 생성됨. 이제 스크립트가 자동 탐색 |
+| `quicktunnel` 하나만 띄우려는데 스택 전체를 재생성 | `depends_on: nginx` 때문. `--no-deps` 로 격리 |
 
 각 항목은 **재발 방지 장치**까지 넣어두었습니다 — 예: Secrets 등록 전
 `--no-store` 로 전달 길이를 측정하는 카나리 검사, 마이그레이션의 인증
