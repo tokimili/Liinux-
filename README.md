@@ -8,9 +8,13 @@
 
 | # | 요구사항 | 현재 상태 |
 |---|---------|----------|
-| 1 | CI/CD 로 VM 에 자동 배포 | ⬜ 미착수 (다음 단계) |
-| 2 | 로컬 VM 에서 확인 + 외부 접속 가능 | ⬜ 미착수 (Cloudflare Tunnel 예정) |
-| 3 | 관리자 대시보드에서 접속 기록 확인 | ✅ **완료 (검증됨)** |
+| 1 | CI/CD 로 VM 에 자동 배포 | ✅ **완료 (실제 배포 성공)** |
+| 2 | 로컬 VM 에서 확인 + 외부 접속 가능 | ✅ **완료 (외부망에서 접속 검증)** |
+| 3 | 관리자 대시보드에서 접속 기록 확인 | ✅ **완료 (3개 망 접속을 IP로 구분 기록)** |
+
+세 가지 요구사항이 **한 번에 교차 검증**되었습니다 — 외부 네트워크에서
+터널 주소로 접속해 대시보드를 열었고, 그 접속이 **접속자의 실제 IP로**
+접속 로그에 기록된 것을 같은 대시보드에서 확인했습니다(아래 §검증 결과).
 
 ## 아키텍처 결정 (중요)
 
@@ -64,15 +68,77 @@ scrypt 해싱 · 타이밍공격 대비 더미해시 · 브루트포스 잠금(I
 | VULN-04 | IDOR | `board.py` edit_post |
 | VULN-05 | 무제한 업로드 (웹셸) | `board.py` _handle_upload |
 
-## 검증 결과 (로컬 실측)
+## 검증 결과
+
+### 요구사항 #1 — CI/CD 자동 배포
+
+`git push` → VM 의 self-hosted runner 가 배포 → 15단계 전원 통과:
+
+```
+✓ 소스 체크아웃       ✓ 이미지 빌드        ✓ 관리자 계정 보장
+✓ 배포 대상 커밋 확인  ✓ DB 컨테이너 기동    ✓ 배포 실행 (헬스체크 게이트)
+✓ 환경변수 파일 생성   ✓ 스키마 마이그레이션  ✓ 배포 이력 기록
+✓ 배포 전 상태 저장   ✓ 배포 후 검증       ✓ 외부 공개 터널 기동
+
+[deploy] 헬스체크 통과 (2초)
+[deploy] 배포 성공 (mode=secure)
+✅ 리비전 확인: <커밋해시>     ✅ 보안 모드 확인: secure
+```
+
+푸시 후 `/healthz` 의 `commit`/`version` 이 새 커밋으로 바뀌어
+**배포가 실제로 일어난 것을 외부에서 원격으로 확인**했습니다.
+
+### 요구사항 #2 — 외부 접속 (다른 네트워크에서 실증)
+
+Cloudflare Quick Tunnel 주소로 **VM 과 무관한 외부 네트워크**에서 접속:
+
+```
+GET /healthz → {"status":"ok","mode":"secure","db":{"ok":true,"latency_ms":0.43}}
+GET /        → HTTP/2 200   0.377s   4240 bytes
+
+응답 헤더 실측:
+  strict-transport-security: max-age=31536000; includeSubDomains
+  content-security-policy: default-src 'self'; script-src 'self' ... object-src 'none'
+  x-frame-options: DENY      x-content-type-options: nosniff
+  referrer-policy: strict-origin-when-cross-origin
+  permissions-policy: geolocation=(), microphone=(), camera=(), payment=()
+```
+
+HTTPS 는 터널이 자동 적용합니다. **공유기 포트를 하나도 열지 않았습니다.**
+
+### 요구사항 #3 — 접속 기록 (서로 다른 망을 IP로 구분)
+
+터널로 로그인한 뒤 `/admin/logs` 에서 집계된 접속자 IP:
+
+```
+ 24건  170.106.xxx.xxx   ← 외부 네트워크 (해외, 터널 경유)
+  2건  59.5.xxx.x        ← 사용자 가정망 (한국)
+  2건  172.19.0.1        ← VM 내부 (docker 네트워크)
+```
+
+터널 서버 IP 가 아니라 **진짜 클라이언트 IP** 가 남습니다.
+nginx 가 `CF-Connecting-IP` 를 전달하고 앱이 그것을 우선 읽기 때문입니다.
+이게 없다면 대시보드에 모든 접속이 Cloudflare IP 하나로 보여 무용해집니다.
+
+### 방어 동작 (터널 경유 실측, secure 모드)
+
+```
+/admin/          비로그인  → 302 /auth/login?next=/admin/   (게이트 정상)
+SQLi  ?ip=' OR 1=1--         → 200, DB 오류/스택트레이스 노출 없음
+XSS   ?ip=<script>alert(1)   → 200, 이스케이프됨 (반사 없음)
+CSRF  토큰 없는 POST         → 400 (차단)
+로그인 → 대시보드 렌더링     → 200, 23,885 bytes (KPI/차트 정상)
+```
+
+### 로컬 실측 (개발 환경)
 
 ```
 공개 라우트   / /about /board/ /board/1 /auth/login /auth/register
              /healthz /static/* → 전부 200,  /nope → 404
 관리자(비로그인) /admin → 308,  /admin/logs → 302,  /api/admin/live → 403  (차단 정상)
 관리자(로그인)   7개 화면 + logs.csv + API 3종 → 전부 200
-대시보드 렌더   kpi-total=528  kpi-ips=15  kpi-threats=83  kpi-errors=64
 위협 탐지 실측   /board/?q=' OR 1=1 --  →  score=100  tags=scanner_ua,sqli
+테스트            pytest 109 passed  /  ruff All checks passed
 ```
 
 ## 데이터 모델 (MariaDB 10개 테이블)
@@ -105,17 +171,69 @@ gunicorn --config deploy/gunicorn.conf.py wsgi:app # 운영
 
 시연 계정: `alice` / `bob` / `charlie` (비밀번호 `DemoPass!2026`)
 
-## 남은 작업 (다음 세션)
+## CI/CD 파이프라인 (요구사항 #1)
 
-1. **Docker + Nginx + Gunicorn 구성** — `Dockerfile`, `docker-compose.yml`,
-   `deploy/nginx/*.conf`, `deploy/gunicorn.conf.py`
-2. **GitHub Actions CI/CD** ⭐요구사항 #1 — `.github/workflows/ci.yml`(lint·bandit·pytest),
-   `deploy.yml`(self-hosted runner → 마이그레이션 → 헬스체크 게이트 → 실패 시 자동 롤백 →
-   `deployments` 테이블 기록)
-3. **VM 부트스트랩 + Cloudflare Tunnel** ⭐요구사항 #2 — `scripts/vm_bootstrap.sh`,
-   `scripts/setup_tunnel.sh`, ufw/fail2ban 설정
-4. **pytest 테스트** — 이중모드 전환, 위협탐지, 권한 검증
-5. **문서** — VM 구축 / CI-CD / 외부노출 가이드
+### 왜 self-hosted runner 인가
+
+GitHub 은 NAT 뒤의 가정용 VM 으로 **접속할 수 없습니다.** 그래서 방향을
+뒤집어, VM 안의 runner 가 GitHub 을 폴링(pull)합니다. 인바운드 포트 0개로
+자동 배포가 성립합니다.
+
+### 흐름
+
+```
+git push
+   ↓
+ci.yml        ruff · bandit · pytest(109) · 이중모드 전환 검증   [GitHub 호스팅]
+   ↓
+deploy.yml    VM 내부 self-hosted runner                        [VM]
+   ├ .env 생성 (GitHub Secrets → 파일, chmod 600)
+   ├ 이미지 빌드 (APP_VERSION = v<run_number>)
+   ├ DB 기동 대기 → 스키마 마이그레이션(멱등) → 관리자 계정 보장(멱등)
+   ├ 배포 전 이미지를 rollback 태그로 보존
+   ├ web/nginx 재생성 → /healthz 폴링 (최대 90초)
+   │     실패 시 → 보존 이미지로 자동 롤백
+   ├ 배포 후 검증: 커밋 해시 일치 + mode=secure 이중 확인
+   └ deployments 테이블에 기록 (커밋·버전·실행자·모드)
+```
+
+**헬스체크 게이트**가 핵심입니다. 컨테이너가 떴다는 것과 앱이 정상이라는
+것은 다릅니다. `/healthz` 가 `{"status":"ok"}` + DB 연결을 응답할 때만
+배포를 성공으로 인정하고, 아니면 이전 이미지로 되돌립니다.
+
+### 운영 명령
+
+```bash
+# 배포 상태 진단 (.env 위치를 자동으로 찾아 길이만 표시 — 값은 안 찍음)
+./scripts/diag_env.sh
+
+# 외부 공개 (도메인 불필요, 30초)
+./scripts/setup_tunnel.sh --quick
+./scripts/setup_tunnel.sh --status    # 현재 공개 주소 확인
+./scripts/setup_tunnel.sh --down      # 외부 노출 차단 (앱은 계속 동작)
+```
+
+> ⚠️ **compose 를 직접 쓸 때는 반드시 `-p vmlab`** 을 붙이세요.
+> 안 붙이면 디렉터리 이름에서 프로젝트명을 유추해(`liinux-`) 실행 중인
+> 스택이 안 보이고, 컨테이너 이름 충돌이 납니다.
+> ```bash
+> sudo docker compose -p vmlab ps
+> ```
+
+> ⚠️ **`.env` 는 `git clone` 한 디렉터리에 없습니다.** 배포가 러너의
+> 작업 디렉터리(`/opt/actions-runner/_work/<repo>/<repo>/`)에 만듭니다.
+> 위 스크립트들은 이 경로를 자동으로 찾습니다.
+
+## 남은 작업
+
+1. **Named Tunnel 로 고정 주소** — 도메인이 생기면 `./scripts/setup_tunnel.sh`
+   (옵션 없이). Quick Tunnel 은 재시작마다 주소가 바뀝니다.
+   앱·배포 구조는 그대로 두면 됩니다.
+2. **`deploy.yml` 에 DB 자격증명 사전 검사 단계 추가** — 볼륨에 남은 옛
+   비밀번호를 마이그레이션 실패 전에 잡아냅니다 (작성 완료, 적용 대기).
+3. **Kali VM 연동 실습** — `vulnerable` 모드를 호스트 전용 네트워크에서
+   공격하고, `secure` 모드에서 차단되는 것을 대시보드로 대조.
+4. **문서 분리** — CI-CD / 외부노출 가이드를 `docs/` 로 독립.
 
 ## 기술 스택
 
@@ -125,5 +243,24 @@ Python 3.12 · Flask 3.0.3 · Jinja2 · Gunicorn 22 · MariaDB · PyMySQL + DBUt
 프런트엔드는 **CDN 프레임워크 없이 순수 CSS**로 작성했습니다.
 CSP `script-src 'self'` 를 엄격히 유지하고, 오프라인 VM 에서도 화면이 깨지지 않게 하기 위함입니다.
 
+## 트러블슈팅 기록 (실제로 겪은 함정)
+
+포트폴리오에서 설명하기 좋은 지점들입니다. 상세는 `docs/VM_SETUP.md`.
+
+| 증상 | 진짜 원인 |
+|------|----------|
+| `.env` 의 모든 값이 1자 | `gh secret set --body -` 는 stdin 을 **안 읽는다**. `--body` 는 문자열 옵션이라 `-` 가 값으로 저장됨 (`curl`/`tar` 관례와 다름) |
+| DB 컨테이너는 healthy 인데 마이그레이션만 실패 | MariaDB 는 `MARIADB_PASSWORD` 를 **볼륨 첫 초기화 때만** 쓴다. 기존 볼륨이면 옛 비밀번호가 유지됨 |
+| `down -v` 했는데 볼륨이 남음 | compose 프로젝트명이 **디렉터리 이름**에서 유추됨(`liinux-`). 없는 볼륨을 지우려 해 조용히 exit 0 |
+| `Conflict. container name "/vmlab-db"` | 같은 원인. 실행 중인 `vmlab` 스택이 안 보여 새로 만들려 듦 |
+| 브라우저에서 `127.0.0.1:8080` 거부 | `127.0.0.1` 은 **머신마다 다르다**. `BIND_ADDR=127.0.0.1` 은 VM 내부 전용 (의도된 설정) |
+| 비밀번호는 맞는데 로그인이 안 됨 | `SESSION_COOKIE_SECURE=true` + `http://` → 브라우저가 쿠키를 안 보냄. HTTPS(터널)로 접속 |
+
+각 항목은 **재발 방지 장치**까지 넣어두었습니다 — 예: Secrets 등록 전
+`--no-store` 로 전달 길이를 측정하는 카나리 검사, 마이그레이션의 인증
+오류 즉시 중단(1044/1045/1049 은 재시도해도 소용없음).
+
 ---
-**최종 갱신**: 2026-09-03 · **모드**: secure · **상태**: 애플리케이션 계층 완료, 배포 계층 진행 예정
+**최종 갱신**: 2026-09-04 · **모드**: secure
+**상태**: ✅ 요구사항 #1·#2·#3 전부 완료 및 실측 검증
+(CI/CD 자동 배포 성공 · 외부망 접속 확인 · 대시보드에 실제 IP 기록 확인)
