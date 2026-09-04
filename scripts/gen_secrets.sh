@@ -63,6 +63,54 @@ info " GitHub Secrets 값 생성"
 info "════════════════════════════════════════════════════════════"
 echo
 
+# --------------------------------------------------------------------------
+# --gh 사전 점검 — 값을 만들기 "전에" 한다
+# --------------------------------------------------------------------------
+# 초기 버전은 비밀값 7개를 화면에 다 뿌린 뒤에야 gh 가 없다고 실패했다.
+# 그러면 (1) 쓰지도 못할 비밀값이 스크롤버퍼에 남고,
+#         (2) 다시 실행하면 값이 전부 새로 생성되므로 방금 본 값은 무의미해진다.
+# 실패할 조건은 값을 만들기 전에 걸러낸다.
+if [[ ${USE_GH} -eq 1 ]]; then
+  if ! command -v gh >/dev/null 2>&1; then
+    cat <<'GUIDE' >&2
+
+gh CLI 가 설치되어 있지 않아 --gh 자동 등록을 쓸 수 없습니다.
+(값은 아직 생성하지 않았습니다. 아래 중 하나를 고르세요.)
+
+  [A] 설치 없이 웹 UI 로 등록  ← 권장, 가장 빠름
+
+      ./scripts/gen_secrets.sh
+
+      값 7개가 출력됩니다. 그걸 GitHub 저장소의
+      Settings → Secrets and variables → Actions
+      → 'New repository secret' 에 하나씩 붙여넣으면 끝입니다.
+
+  [B] gh 를 설치해서 자동 등록
+
+      sudo apt update && sudo apt install -y gh
+      gh auth login          # GitHub.com → HTTPS → 브라우저 로그인
+      ./scripts/gen_secrets.sh --gh
+
+      * apt 에 gh 가 없다고 나오면 공식 저장소를 추가하세요:
+        sudo mkdir -p -m 755 /etc/apt/keyrings
+        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+          | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
+        sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+          | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
+        sudo apt update && sudo apt install -y gh
+
+두 방법의 결과는 완전히 동일합니다.
+
+GUIDE
+    die "[A] 또는 [B] 중 하나를 선택하세요."
+  fi
+  gh auth status >/dev/null 2>&1 || \
+    die "gh 인증이 안 되어 있습니다. 먼저 실행:  gh auth login"
+  ok "gh CLI 확인됨 — 생성 후 자동 등록합니다"
+  echo
+fi
+
 # 고정값 성격 (사람이 기억해야 하는 것)
 ADMIN_USERNAME="admin"
 DB_NAME="vmlab"
@@ -92,43 +140,7 @@ echo
 # gh CLI 자동 등록
 # --------------------------------------------------------------------------
 if [[ ${USE_GH} -eq 1 ]]; then
-  # gh CLI 는 vm_bootstrap.sh 가 설치하지 않는다(배포 자체에는 불필요하고,
-  # 러너는 GitHub 가 직접 인증하므로). --gh 를 쓸 때만 필요하다.
-  # 그래서 "설치하세요" 로 끝내지 않고 실행할 명령을 그대로 준다.
-  if ! command -v gh >/dev/null 2>&1; then
-    cat <<'GUIDE' >&2
-
-gh CLI 가 설치되어 있지 않습니다.
-
-  [A] gh 를 설치해서 자동 등록하기 (명령 3줄)
-
-      sudo apt update && sudo apt install -y gh
-      gh auth login          # GitHub -> HTTPS -> 브라우저 로그인(코드 입력)
-      ./scripts/gen_secrets.sh --gh
-
-      * apt 에 gh 가 없다고 나오면 공식 저장소를 추가하세요:
-        sudo mkdir -p -m 755 /etc/apt/keyrings
-        curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
-          | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null
-        sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg
-        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
-          | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null
-        sudo apt update && sudo apt install -y gh
-
-  [B] 설치 없이 웹 UI 로 직접 등록하기 (--gh 없이 실행)
-
-      ./scripts/gen_secrets.sh
-
-      출력된 값을 GitHub 저장소 ->
-      Settings -> Secrets and variables -> Actions -> New repository secret
-      에 하나씩 붙여넣으면 됩니다. 결과는 [A] 와 동일합니다.
-
-GUIDE
-    die "위 [A] 또는 [B] 중 하나를 선택하세요."
-  fi
-  gh auth status >/dev/null 2>&1 || \
-    die "gh 인증이 안 되어 있습니다. 먼저 실행:  gh auth login"
-
+  # gh 존재/인증 점검은 위쪽(값 생성 전)에서 이미 끝냈다.
   info "gh CLI 로 Secrets 등록 중..."
 
   # ★ 실패를 반드시 집계한다.
