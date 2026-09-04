@@ -610,6 +610,63 @@ docker logs -f vmlab-tunnel
 - `Provided Tunnel token is not valid` → 토큰 재확인
 - 연결은 되는데 502 → Public hostname 의 URL 이 `nginx:8080` 인지 확인
 
+### 배포가 `Access denied` / 마이그레이션에서 실패
+
+`DB_PASSWORD` 를 바꾼 뒤에 발생합니다. **DB 볼륨에 옛 비밀번호가 남아 있습니다.**
+
+MariaDB 는 `MARIADB_PASSWORD` 환경변수를 **볼륨이 빈 상태로 처음 초기화될
+때만** 사용합니다. 볼륨이 이미 있으면 환경변수는 완전히 무시되고 볼륨 안에
+저장된 옛 비밀번호가 계속 쓰입니다.
+
+그래서 증상이 헷갈립니다 — **DB 컨테이너는 `healthy` 로 잘 뜨는데
+마이그레이션만 실패**합니다. 기동은 비밀번호와 무관하기 때문입니다.
+
+```bash
+cd /opt/actions-runner/_work/Liinux-/Liinux-
+sudo docker compose down -v          # -v 로 볼륨까지 삭제
+sudo docker volume ls | grep vmlab   # 아무것도 안 나와야 정상
+```
+
+> ⚠️ `-v` 는 DB 데이터를 모두 지웁니다. 초기 구축 중이라면 문제없습니다.
+> 보존할 데이터가 있으면 먼저 백업하세요:
+> ```bash
+> sudo docker compose exec db mariadb-dump -uroot \
+>   -p"$MYSQL_ROOT_PASSWORD" --all-databases > backup.sql
+> ```
+
+그다음 배포를 다시 실행하면 볼륨이 새 비밀번호로 초기화됩니다.
+
+### `down -v` 를 했는데 볼륨이 그대로 남아 있음
+
+**compose 프로젝트 이름이 갈렸을 때** 생깁니다. 실제로 겪은 문제입니다.
+
+compose 는 프로젝트 이름으로 리소스 이름을 만듭니다(`<프로젝트>_db_data`).
+이름을 지정하지 않으면 **실행한 디렉터리 이름**에서 유추합니다.
+
+| 실행 주체 | 프로젝트명 | 볼륨 이름 |
+|---|---|---|
+| 배포 워크플로 (`COMPOSE_PROJECT_NAME=vmlab`) | `vmlab` | `vmlab_db_data` |
+| 사람이 터미널에서 직접 (`Liinux-` 디렉터리) | `liinux-` | `liinux-_db_data` |
+
+즉 `down -v` 가 **존재하지 않는 `liinux-_db_data`** 를 대상으로 삼아
+**아무것도 지우지 않고 조용히 성공**합니다. `down` 은 지울 게 없어도 오류를
+내지 않으므로 알아채기 어렵습니다. (출력이 한 줄도 없으면 이 상황입니다)
+
+지금은 `docker-compose.yml` 최상단에 `name: vmlab` 을 박아 해결했습니다.
+어디서 실행하든 항상 `vmlab` 입니다. 확인:
+
+```bash
+sudo docker compose config | head -3     # name: vmlab 이 보여야 정상
+```
+
+구버전을 쓰고 있다면 프로젝트명을 명시하세요:
+
+```bash
+sudo docker compose -p vmlab down -v
+# 또는 볼륨을 직접 지정
+sudo docker volume rm vmlab_db_data
+```
+
 ### 디스크가 가득 참
 
 ```bash
