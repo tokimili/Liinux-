@@ -274,6 +274,55 @@ sudo systemctl enable --now ssh
 
 > **`ADMIN_INITIAL_PASSWORD` 는 최초 로그인용입니다.** 로그인 후 즉시 변경하세요.
 
+### 등록이 잘 됐는지 확인하는 방법
+
+GitHub 은 **등록된 Secret 값을 다시 보여주지 않습니다.** 목록에 이름 7개가
+보이더라도 값이 올바른지는 알 수 없습니다. 그래서 배포가 한 번 돌고 나면
+반드시 이걸로 확인하세요:
+
+```bash
+./scripts/diag_env.sh
+```
+
+배포가 만든 `.env` 의 **값 길이만** (비밀값은 출력하지 않음) 보여줍니다.
+`SECRET_KEY` 가 48자, `ADMIN_INITIAL_PASSWORD` 가 20자면 정상입니다.
+
+### 실제로 겪은 함정 — `gh secret set --body -`
+
+값이 전부 **`-` 한 글자**로 등록되어 배포가 실패한 일이 있었습니다.
+원인은 구버전 `gen_secrets.sh` 의 이 한 줄이었습니다:
+
+```bash
+printf '%s' "$값" | gh secret set 이름 --body -    # ← 틀림
+```
+
+`gh` 의 `--body` 는 **문자열 옵션**입니다. `curl`/`tar` 처럼 `-` 를
+표준입력으로 해석하지 않고, **문자 `-` 자체를 값으로 저장**합니다.
+`gh` 소스( `pkg/cmd/secret/set/set.go` 의 `getBody` )가 그 근거입니다:
+
+```go
+if opts.Body != "" { return []byte(opts.Body), nil }  // "-" 는 여기서 반환됨
+...
+body, err := io.ReadAll(opts.IO.In)                   // stdin 은 여기까지 와야 읽힘
+```
+
+올바른 방법은 **`--body` 를 생략하고 stdin 으로만 넘기는 것**입니다.
+(값이 `ps` 에 노출되지 않는 장점도 있습니다.)
+
+```bash
+printf '%s' "$값" | gh secret set 이름               # ← 맞음
+```
+
+이 실패가 특히 고약했던 이유:
+
+- `gh` 가 **종료코드 0(성공)** 을 반환하므로 스크립트는 이상을 감지 못 함
+- GitHub 목록에도 7개가 정상 등록된 것처럼 보임
+- 증상은 한참 뒤 배포 마지막 단계에서
+  `ADMIN_INITIAL_PASSWORD 가 10자 미만입니다` 로 나타남
+
+현재 스크립트는 등록 **전에** `--no-store` 로 값 전달 경로를 자체 검증하므로
+같은 문제가 다시 생기면 즉시 중단됩니다.
+
 ---
 
 ## 4. self-hosted 러너 설치 — `setup_runner.sh`
@@ -517,15 +566,32 @@ sudo journalctl -u 'actions.runner.*' -n 50 --no-pager
 `deploy.yml` 은 `[self-hosted, linux, vmlab]` 를 요구합니다.
 러너 설정 화면에서 라벨 3개가 모두 있는지 확인하세요.
 
-### 배포는 성공했는데 사이트가 안 뜸
+### 배포는 성공했는데 사이트가 안 뜸 / `.env` 를 확인하고 싶다
 
-거의 항상 **Secrets 미등록**입니다.
+거의 항상 **Secrets 문제**(미등록 또는 값이 잘못 등록됨)입니다.
 
 ```bash
-cd ~/Liinux- && cat .env | grep -E "^(SECRET_KEY|DB_PASSWORD)="
+./scripts/diag_env.sh
 ```
 
-`=` 뒤가 비어 있으면 3단계를 다시 하고 재배포하세요.
+> ⚠️ **`~/Liinux-/.env` 를 보면 안 됩니다.** 거기엔 파일이 없습니다.
+>
+> 배포는 여러분이 `git clone` 한 `~/Liinux-` 에서 돌지 않습니다.
+> self-hosted 러너는 `actions/checkout` 으로 **자기 작업 디렉터리에**
+> 소스를 새로 내려받고, `.env` 도 그곳에 만듭니다:
+>
+> ```
+> /opt/actions-runner/_work/Liinux-/Liinux-/.env
+> ```
+>
+> `diag_env.sh` 는 이 경로를 자동으로 찾아주고, 비밀값을 화면에 찍지 않고
+> **길이만** 보여줍니다. 직접 찾고 싶다면:
+>
+> ```bash
+> sudo find / -maxdepth 6 -type d -name '_work' 2>/dev/null
+> ```
+
+값이 비어 있거나 짧으면 3단계를 다시 하고 재배포하세요.
 
 ### 로그인이 안 됨 (비밀번호는 맞는데)
 

@@ -141,6 +141,40 @@ echo
 # --------------------------------------------------------------------------
 if [[ ${USE_GH} -eq 1 ]]; then
   # gh 존재/인증 점검은 위쪽(값 생성 전)에서 이미 끝냈다.
+
+  # ------------------------------------------------------------------------
+  # 전달 경로 자체 검증 (카나리아)
+  # ------------------------------------------------------------------------
+  # `--body -` 버그는 "등록은 성공(종료코드 0)했는데 값만 틀린" 형태였다.
+  # 종료코드로는 절대 잡을 수 없으므로, 실제로 등록하기 전에
+  # **값이 gh 까지 온전히 전달되는지** 한 번 측정한다.
+  #
+  # 원리: --no-store 는 저장하지 않고 암호문(base64)만 출력한다.
+  #       암호문은 libsodium sealed box = 48바이트 + 평문길이 이므로
+  #       복호 없이도 "gh 가 몇 글자를 받았는지" 역산할 수 있다.
+  # 이 검증이 실패하면 gh 의 동작이 또 바뀐 것이니 등록을 중단한다.
+  probe_len() {
+    local plain="$1" b64 raw
+    b64="$(printf '%s' "${plain}" | gh secret set __VMLAB_PROBE --no-store 2>/dev/null)" || return 1
+    raw="$(printf '%s' "${b64}" | base64 -d 2>/dev/null | wc -c)" || return 1
+    [[ "${raw}" -gt 48 ]] || return 1
+    echo $((raw - 48))
+  }
+
+  PROBE_PLAIN="0123456789012345678901234567890123456789"   # 40자
+  if PROBE_GOT="$(probe_len "${PROBE_PLAIN}")"; then
+    if [[ "${PROBE_GOT}" -eq ${#PROBE_PLAIN} ]]; then
+      ok "값 전달 경로 검증 통과 (${PROBE_GOT}자 전달 확인)"
+    else
+      warn "값 전달 경로 이상: ${#PROBE_PLAIN}자를 보냈는데 ${PROBE_GOT}자만 전달됨"
+      die "gh 의 값 전달 방식이 예상과 다릅니다. 웹 UI 로 등록하세요: ./scripts/gen_secrets.sh"
+    fi
+  else
+    # 네트워크/권한 문제로 측정을 못 한 것일 수 있다. 등록을 막지는 않는다.
+    warn "값 전달 경로를 미리 검증하지 못했습니다 (등록은 계속 진행합니다)"
+  fi
+  echo
+
   info "gh CLI 로 Secrets 등록 중..."
 
   # ★ 실패를 반드시 집계한다.
@@ -152,7 +186,25 @@ if [[ ${USE_GH} -eq 1 ]]; then
   GH_LAST_ERR=""
   set_secret() {
     local out
-    if out="$(printf '%s' "$2" | gh secret set "$1" --body - 2>&1)"; then
+    # ★ `--body -` 를 쓰면 안 된다. 이게 실제로 배포를 망가뜨렸다.
+    #
+    #   gh 의 `--body` 는 **문자열 옵션**이고, 값 처리 로직은 이렇다
+    #   (cli/cli pkg/cmd/secret/set/set.go 의 getBody):
+    #       if opts.Body != "" { return []byte(opts.Body) }   ← 여기서 끝
+    #       ... io.ReadAll(opts.IO.In)                        ← stdin 은 여기
+    #   즉 `-` 는 "빈 문자열이 아니므로" 그 자리에서 반환되고, stdin 은
+    #   아예 읽지 않는다. 결과적으로 파이프로 보낸 48자는 버려지고
+    #   **문자 '-' 한 글자가 Secret 값으로 저장**된다.
+    #   ("-" 를 stdin 으로 해석하는 건 curl/tar 의 관례일 뿐, gh 는 아니다)
+    #
+    #   증상: 배포가 만든 .env 의 모든 값이 정확히 1자가 되고,
+    #         bootstrap_admin.py 가 "ADMIN_INITIAL_PASSWORD 10자 미만" 으로
+    #         죽는다. Secrets 목록에는 7개가 멀쩡히 등록돼 보이므로
+    #         (GitHub 은 값을 보여주지 않는다) 원인을 찾기가 극도로 어렵다.
+    #
+    #   해결: --body 를 아예 생략하고 stdin 으로만 넘긴다.
+    #         값이 프로세스 인자(ps 로 보임)에 노출되지 않는 장점도 있다.
+    if out="$(printf '%s' "$2" | gh secret set "$1" 2>&1)"; then
       ok "$1 등록됨"
     else
       warn "$1 등록 실패"
