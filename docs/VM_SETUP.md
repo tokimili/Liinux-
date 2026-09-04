@@ -633,6 +633,41 @@ sudo journalctl -u 'actions.runner.*' -n 50 --no-pager
 에러 메시지에 "찾아본 경로" 목록이 함께 출력되므로 그걸 먼저 보세요.
 `./scripts/diag_env.sh` 로 현재 `.env` 상태를 점검할 수도 있습니다.
 
+### `Conflict. The container name "/vmlab-db" is already in use`
+
+compose 가 **다른 프로젝트 이름으로** 동작했다는 신호입니다.
+프로젝트 이름 결정 우선순위는 이렇습니다:
+
+```
+-p 옵션  >  COMPOSE_PROJECT_NAME  >  파일의 name:  >  실행한 디렉터리 이름
+```
+
+배포 워크플로는 `COMPOSE_PROJECT_NAME=vmlab` 을 주지만, 터미널에서 직접
+실행할 때는 그 환경변수가 없습니다. 그러면 디렉터리 `Liinux-` 에서
+`liinux-` 를 유추해버립니다 → **실행 중인 `vmlab` 스택이 아예 안 보임**
+→ `db`/`web`/`nginx` 를 새로 만들려 드는데 `container_name` 이
+`vmlab-db` 로 고정돼 있어 이름이 충돌합니다.
+
+`docker-compose.yml` 에 `name: vmlab` 을 넣어뒀지만 **그것만으로는
+부족합니다.** 러너 작업 디렉터리에는 배포 시점의 옛 커밋이 체크아웃돼
+있어서 그 파일에는 `name:` 이 없을 수 있습니다.
+
+그래서 `setup_tunnel.sh` 는 `-p vmlab` 을 항상 명시하고,
+`--no-deps` 로 터널 컨테이너만 띄웁니다(실행 중인 앱을 건드리지 않음).
+
+직접 compose 를 쓸 때도 **항상 `-p vmlab` 을 붙이세요**:
+
+```bash
+sudo docker compose -p vmlab ps
+sudo docker compose -p vmlab down -v
+```
+
+잘못된 이름으로 만들어진 잔여물(네트워크·빈 볼륨)은 이렇게 지웁니다:
+
+```bash
+sudo docker compose -p liinux- down -v
+```
+
 ### 터널이 HEALTHY 가 아님
 
 ```bash

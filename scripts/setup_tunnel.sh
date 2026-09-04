@@ -78,6 +78,31 @@ fi
 dk() { "${DOCKER[@]}" "$@"; }
 
 # --------------------------------------------------------------------------
+# compose 는 반드시 프로젝트 이름을 명시해서 부른다
+#
+# ★ 왜 -p vmlab 을 하드코딩하는가 (실제로 컨테이너 이름 충돌을 냈다)
+#   compose 는 프로젝트 이름을 정하는 우선순위가 이렇다:
+#       -p 옵션  >  COMPOSE_PROJECT_NAME  >  파일의 top-level name:
+#                >  **실행한 디렉터리 이름**
+#   배포 워크플로는 COMPOSE_PROJECT_NAME=vmlab 을 주지만, 사람이
+#   터미널에서 실행할 때는 그 환경변수가 없다. 그래서 디렉터리 이름
+#   `Liinux-` 에서 `liinux-` 를 유추해버린다.
+#
+#   → 실행 중인 vmlab 스택이 **아예 안 보인다**. 그래서 quicktunnel 하나만
+#     띄우려 했는데 depends_on 을 따라 db/web/nginx 까지 새로 만들려 들고,
+#     container_name 이 고정(vmlab-db 등)이라 이미 도는 컨테이너와
+#     이름이 충돌한다:
+#         Conflict. The container name "/vmlab-db" is already in use
+#
+#   docker-compose.yml 에 `name: vmlab` 을 넣어뒀지만 그것만으로는 부족하다.
+#   러너 작업 디렉터리에는 배포 시점의 **옛 커밋**이 체크아웃돼 있어서
+#   그 파일에 name: 이 없을 수 있다(정확히 이 상황이 발생했다).
+#   파일 내용에 의존하지 않도록 호출 쪽에서 못을 박는다.
+# --------------------------------------------------------------------------
+COMPOSE_PROJECT="${COMPOSE_PROJECT_NAME:-vmlab}"
+dkc() { "${DOCKER[@]}" compose -p "${COMPOSE_PROJECT}" "$@"; }
+
+# --------------------------------------------------------------------------
 # 배포가 실제로 이루어진 디렉터리를 찾는다
 #
 # ★ 여기서 한 번 크게 헤맸다 (같은 함정을 diag_env.sh 에서 이미 겪었다)
@@ -219,8 +244,8 @@ if [[ "${ACTION}" == "down" ]]; then
   # 두 방식 모두 내린다. 어느 쪽이 떠 있었는지 사용자가 기억하지 못해도
   # '--down 했으니 이제 외부 노출은 없다'가 보장되어야 한다.
   for svc in cloudflared quicktunnel; do
-    dk compose --profile tunnel --profile quick stop "${svc}" 2>/dev/null || true
-    dk compose --profile tunnel --profile quick rm -f "${svc}" 2>/dev/null || true
+    dkc --profile tunnel --profile quick stop "${svc}" 2>/dev/null || true
+    dkc --profile tunnel --profile quick rm -f "${svc}" 2>/dev/null || true
   done
   if [[ -n "$(running_tunnel)" ]]; then
     die "터널 컨테이너가 아직 살아 있습니다. 확인:  ${DOCKER[*]} ps | grep vmlab-"
@@ -311,16 +336,65 @@ fi
 if [[ ${QUICK} -eq 1 ]]; then
   step "Quick Tunnel 기동 (도메인 불필요)"
 
+  # ★ 프로젝트 이름을 명시하지 않고 compose 를 돌렸던 실패의 잔여물을 알린다
+  #   그 경우 디렉터리 이름에서 유추된 프로젝트(예: liinux-)가 네트워크와
+  #   볼륨을 만들어놓고 컨테이너 이름 충돌로 실패해 있다.
+  #
+  #   ★★ 자동으로 지우지 않는다.
+  #      이 VM 에 우리와 무관한 compose 프로젝트가 있을 수 있고, 남의
+  #      네트워크·볼륨을 스크립트가 임의로 삭제하는 건 선을 넘는 짓이다.
+  #      게다가 이 잔여물은 동작을 막지 않는다(-p 를 명시하므로).
+  #      그래서 "발견했고, 지우려면 이 명령" 까지만 한다.
+  STRAY="$(dk network ls --format '{{.Name}}' 2>/dev/null \
+            | grep -E '_(frontend|backend)$' \
+            | grep -v "^${COMPOSE_PROJECT}_" \
+            | sed -E 's/_(frontend|backend)$//' | sort -u || true)"
+  if [[ -n "${STRAY}" ]]; then
+    while IFS= read -r proj; do
+      [[ -n "${proj}" ]] || continue
+      # 그 네트워크에 붙어 있는 컨테이너가 없을 때만 "잔여물"로 판단한다.
+      # 뭔가 붙어 있다면 그건 살아 있는 다른 프로젝트이므로 언급하지 않는다.
+      local_attached="$(dk network inspect "${proj}_frontend" \
+                          --format '{{len .Containers}}' 2>/dev/null || echo 0)"
+      [[ "${local_attached}" == "0" ]] || continue
+      warn "쓰이지 않는 compose 프로젝트 잔여물이 있습니다: ${proj}"
+      echo  "      (프로젝트 이름을 지정하지 않고 실행했던 흔적입니다. 동작에는 영향 없음)"
+      echo  "      지우려면:  ${DOCKER[*]} compose -p ${proj} down -v"
+    done <<< "${STRAY}"
+  fi
+
   # 노출 경로를 하나로 유지한다 — named 터널이 떠 있으면 먼저 정리
   if dk ps --format '{{.Names}}' | grep -qx vmlab-tunnel; then
     warn "고정 주소 터널이 실행 중입니다. 공개 경로를 하나로 유지하기 위해 중지합니다."
-    dk compose --profile tunnel stop cloudflared >/dev/null 2>&1 || true
-    dk compose --profile tunnel rm -f cloudflared >/dev/null 2>&1 || true
+    dkc --profile tunnel stop cloudflared >/dev/null 2>&1 || true
+    dkc --profile tunnel rm -f cloudflared >/dev/null 2>&1 || true
   fi
 
   # 재실행 시 이전 주소가 로그에 남아 혼동되는 것을 막기 위해 컨테이너를 새로 만든다
-  dk compose --profile quick rm -sf quicktunnel >/dev/null 2>&1 || true
-  dk compose --profile quick up -d quicktunnel || die "Quick Tunnel 기동 실패"
+  dkc --profile quick rm -sf quicktunnel >/dev/null 2>&1 || true
+
+  # ★ --no-deps 가 필요하다
+  #   quicktunnel 은 `depends_on: nginx (service_healthy)` 를 갖고 있어서,
+  #   그냥 up 하면 compose 가 db/web/nginx 까지 함께 "맞추려" 든다.
+  #   이미 잘 돌고 있는 스택을 재생성하는 건 순수한 위험이다
+  #   (컨테이너 이름 충돌, 불필요한 다운타임).
+  #   nginx 가 healthy 인지는 위의 secure 이중 확인에서 이미 봤으므로
+  #   여기서는 터널 컨테이너 하나만 정확히 띄운다.
+  if ! dkc --profile quick up -d --no-deps quicktunnel; then
+    echo
+    cat >&2 <<EOF
+  기동에 실패했습니다. 확인해볼 것:
+
+    1) 앱 스택이 실행 중인가
+         ${DOCKER[*]} compose -p ${COMPOSE_PROJECT} ps
+    2) 이름이 겹치는 옛 컨테이너가 남아 있는가
+         ${DOCKER[*]} ps -a | grep vmlab-quicktunnel
+       남아 있으면:
+         ${DOCKER[*]} rm -f vmlab-quicktunnel
+
+EOF
+    die "Quick Tunnel 기동 실패"
+  fi
   ok "quicktunnel 컨테이너 시작"
 
   echo "  주소 발급 대기 중..."
@@ -452,7 +526,8 @@ step "터널 기동"
 # --------------------------------------------------------------------------
 # --profile tunnel 이 필요하다. 이 프로파일 없이는 cloudflared 가 뜨지 않는데,
 # 그게 의도된 안전장치다 (docker-compose.yml 주석 참고).
-dk compose --profile tunnel up -d cloudflared || die "터널 기동 실패"
+# --no-deps: 이미 돌고 있는 앱 스택을 건드리지 않는다 (quick 경로와 같은 이유)
+dkc --profile tunnel up -d --no-deps cloudflared || die "터널 기동 실패"
 ok "cloudflared 컨테이너 시작"
 
 echo "  연결 수립 대기 중..."
