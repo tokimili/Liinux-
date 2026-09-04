@@ -92,6 +92,38 @@ ok "curl / tar / jq 확인"
 # --------------------------------------------------------------------------
 step "등록 토큰 확인"
 # --------------------------------------------------------------------------
+# gh CLI 가 인증돼 있으면 등록 토큰을 자동 발급한다.
+#   주의: 이 스크립트는 sudo 로 실행되므로 root 의 gh 설정을 보게 된다.
+#   gh auth login 은 일반 사용자 계정으로 했을 것이므로 sudo -u 로 되돌려
+#   호출해야 인증 정보를 찾을 수 있다. (이걸 빼면 항상 인증 실패로 떨어진다)
+if [[ -z "${RUNNER_TOKEN}" ]] \
+   && sudo -u "${TARGET_USER}" gh auth status >/dev/null 2>&1; then
+  echo "  gh CLI 인증이 확인되어 등록 토큰을 자동 발급합니다..."
+  # gh api 는 실패해도 stdout 에 에러 JSON 을 그대로 뱉는다.
+  #   예: {"message":"Resource not accessible by integration","status":"403"}
+  # 이때 `|| true` 가 종료코드를 삼켜버리므로, 빈 값 검사만 하면
+  # **에러 JSON 이 토큰으로 들어가** config.sh 가 의미불명 오류로 죽는다.
+  # 그래서 종료코드와 토큰 형식을 함께 검증한다.
+  _tok=""
+  if _tok="$(sudo -u "${TARGET_USER}" gh api -X POST \
+               "repos/${REPO}/actions/runners/registration-token" \
+               --jq '.token' 2>/dev/null)"; then
+    : # 발급 성공
+  else
+    _tok=""
+  fi
+  # 러너 등록 토큰은 'A' 로 시작하는 대문자+숫자 조합이다.
+  if [[ "${_tok}" =~ ^A[A-Z0-9]{20,}$ ]]; then
+    RUNNER_TOKEN="${_tok}"
+    ok "등록 토큰 자동 발급 완료 (웹에서 복사할 필요 없음)"
+  else
+    RUNNER_TOKEN=""
+    warn "자동 발급 실패 — 웹에서 직접 발급받는 방식으로 진행합니다"
+    [[ -n "${_tok}" ]] && warn "  (응답: ${_tok:0:60}...)"
+  fi
+  unset _tok
+fi
+
 if [[ -z "${RUNNER_TOKEN}" ]]; then
   echo
   echo "  아래 주소에서 등록 토큰을 발급받으세요 (유효기간 1시간):"
