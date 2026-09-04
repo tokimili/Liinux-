@@ -51,18 +51,36 @@
 > 디스크를 20GB 로 잡으면 배포 몇 번 만에 가득 찹니다.
 > Docker 는 이전 이미지를 자동으로 지우지 않습니다.
 
-### 네트워크 어댑터 — 중요
+### 네트워크 어댑터 — NAT 하나로 충분합니다
 
-VirtualBox / VMware 에서 어댑터를 **2개** 만듭니다.
+**지금 단계에서는 기본 NAT 어댑터 1개만 있으면 됩니다.**
+추가 설정 없이 VM 을 만드시면 됩니다.
 
-| 어댑터 | 종류 | 용도 |
+이유는 이 구성의 모든 통신이 **아웃바운드**이기 때문입니다.
+
+| 요구사항 | 통신 방향 | NAT 만으로 |
 |---|---|---|
-| 1 | **NAT** 또는 브리지 | 인터넷 연결 (러너·터널의 아웃바운드) |
-| 2 | **호스트 전용(Host-only)** | Kali 공격 실습 전용, 인터넷 차단 |
+| #1 CI/CD 자동 배포 | 러너 → GitHub (아웃바운드) | ✅ |
+| #2 외부 접속 | cloudflared → Cloudflare (아웃바운드) | ✅ |
+| #3 관리자 대시보드 | 위 경로로 유입 | ✅ |
 
-어댑터 2 를 분리해두는 이유가 이 프로젝트의 안전선입니다.
-`vulnerable` 모드 실습은 **호스트 전용 네트워크에서만** 하고,
-인터넷에 노출되는 것은 `secure` 빌드뿐입니다.
+포트포워딩을 쓰는 구성이라면 브리지 어댑터가 필요했겠지만,
+터널은 VM 이 바깥으로 먼저 연결을 맺으므로 NAT 뒤에서도 그대로 동작합니다.
+
+#### 어댑터가 2개 필요해지는 시점 (Phase 3)
+
+Kali 로 `vulnerable` 버전을 공격하는 실습을 할 때입니다.
+VirtualBox NAT 는 **다른 VM 에서 접근이 안 되기** 때문에,
+그때 호스트 전용(Host-only) 어댑터를 추가합니다.
+
+```
+VM 종료 → 설정 → 네트워크 → 어댑터 2 → 호스트 전용 활성화 → 시작
+```
+
+**1분이면 되고 재구축은 필요 없습니다.** 지금 미리 만들 이유가 없습니다.
+
+> 실습 시 어댑터를 분리하는 이유는, 취약 버전을 인터넷에서 격리하기
+> 위해서입니다. 호스트 전용 네트워크는 외부와 통신되지 않습니다.
 
 ### 설치 시 선택
 
@@ -198,7 +216,65 @@ https://github.com/tokimili/Liinux-/actions
 
 ## 5. 외부 공개 — `setup_tunnel.sh`
 
-### Cloudflare 준비 (최초 1회)
+두 가지 경로가 있습니다. **도메인이 없으면 A 를 쓰세요.**
+
+| | A. Quick Tunnel | B. Named Tunnel |
+|---|---|---|
+| 도메인 | **불필요** | 필요 |
+| Cloudflare 계정 | **불필요** | 필요 |
+| 주소 | `https://랜덤.trycloudflare.com` | `https://vmlab.내도메인.com` |
+| 주소 유지 | 재시작 시 **변경됨** | 고정 |
+| 준비 시간 | **30초** | 1~2시간 (네임서버 반영) |
+| HTTPS | 자동 | 자동 |
+| 용도 | 개발·시연·검증 | 포트폴리오 제출 |
+
+요구사항 #2("VM이 켜져 있는 동안 다른 곳에서도 접속 가능")는
+**A 로 완전히 충족됩니다.** 앱·배포 구조는 A/B 가 완전히 동일해서,
+나중에 도메인이 생기면 B 로 바꾸기만 하면 됩니다.
+
+---
+
+### A. Quick Tunnel — 도메인 없이 즉시 공개
+
+```bash
+./scripts/setup_tunnel.sh --quick
+```
+
+이게 전부입니다. 30초 정도 뒤에 주소가 출력됩니다:
+
+```
+  ╔══════════════════════════════════════════════════════════╗
+  ║  외부 접속 주소 (HTTPS 자동 적용)                        ║
+  ╚══════════════════════════════════════════════════════════╝
+
+      https://brave-lion-tasty-mint.trycloudflare.com
+
+      관리자 대시보드: https://brave-lion-tasty-mint.trycloudflare.com/admin
+```
+
+주소를 잊었으면:
+```bash
+./scripts/setup_tunnel.sh --status
+```
+
+**한계 — 알고 쓰셔야 합니다**
+
+- 주소가 **재시작할 때마다 바뀝니다.** 컨테이너를 내리면 사라집니다
+- Cloudflare 가 가용성을 보장하지 않습니다 (테스트용 무료 서비스)
+- 그래서 포트폴리오 문서에 이 주소를 적어두면 나중에 깨집니다
+
+접속자 IP 는 정상 기록됩니다. 앱이 `CF-Connecting-IP` 헤더를
+최우선으로 읽기 때문에, Quick Tunnel 에서도 대시보드에
+실제 접속자 IP 가 남습니다 (터널 서버 IP 가 아님).
+
+---
+
+### B. Named Tunnel — 고정 주소 (도메인 필요)
+
+포트폴리오 제출용으로 안 바뀌는 주소가 필요할 때 진행하세요.
+지금 당장은 건너뛰어도 됩니다.
+
+#### Cloudflare 준비 (최초 1회)
 
 1. Cloudflare 계정 생성 (무료) — https://dash.cloudflare.com/sign-up
 2. 도메인을 Cloudflare 에 연결
@@ -223,33 +299,43 @@ https://github.com/tokimili/Liinux-/actions
    > `localhost:8080` 이 아닙니다. cloudflared 도 컨테이너 안에서 돌기 때문에
    > 같은 Docker 네트워크의 **컨테이너 이름**으로 지정해야 합니다.
 
-### 실행
+#### 실행
 
 ```bash
-./scripts/setup_tunnel.sh
+./scripts/setup_tunnel.sh        # 옵션 없이 → Named Tunnel
 ```
 
-스크립트가 켜기 전에 **두 번 확인**합니다:
-
-1. `.env` 의 `SECURITY_MODE` 가 `secure` 인가
-2. 실행 중인 앱의 `/healthz` 응답도 `secure` 인가
-   (`.env` 는 secure 인데 컨테이너가 옛날 vulnerable 이미지일 수 있음)
-
-하나라도 어긋나면 **터널을 켜지 않고 종료**합니다.
-
-토큰은 `.env` 에 저장되지만, **GitHub Secrets 에도 등록**하세요.
+토큰은 `.env` 에 자동 저장되지만, **GitHub Secrets 에도 등록**하세요.
 등록하지 않으면 다음 배포 때 `.env` 가 새로 만들어지면서 토큰이 사라집니다.
 
 ```bash
 gh secret set CLOUDFLARE_TUNNEL_TOKEN
 ```
 
-### 관리
+---
+
+### 공통 — 사고를 막는 장치
+
+A/B 어느 경로든 터널을 켜기 전에 **두 번 확인**합니다:
+
+1. `.env` 의 `SECURITY_MODE` 가 `secure` 인가
+2. 실행 중인 앱의 `/healthz` 응답도 `secure` 인가
+
+2번을 따로 보는 이유는, `.env` 는 secure 로 바꿨지만
+컨테이너는 아직 이전 vulnerable 이미지로 돌고 있는 상태를
+파일만 보면 놓치기 때문입니다.
+
+하나라도 어긋나면 **터널을 켜지 않고 중단**합니다(exit 1).
+
+### 공통 — 관리 명령
 
 ```bash
-./scripts/setup_tunnel.sh --status   # 상태
+./scripts/setup_tunnel.sh --status   # 상태 + 현재 공개 주소
 ./scripts/setup_tunnel.sh --down     # 내리기 (앱은 계속 동작)
 ```
+
+`--down` 은 A/B 둘 다 내리고, 정말 사라졌는지 확인합니다.
+어느 방식을 켰었는지 기억하지 않아도 "노출 없음"이 보장됩니다.
 
 ---
 
@@ -276,20 +362,19 @@ curl -s localhost:8080/healthz | jq
 
 ### 외부 접속 — 반드시 LTE 로
 
-휴대폰에서 **Wi-Fi 를 끄고** 접속:
+공개 주소를 확인하고:
+```bash
+./scripts/setup_tunnel.sh --status
+```
 
-```
-https://vmlab.본인도메인.com
-```
+휴대폰에서 **Wi-Fi 를 끄고(LTE)** 그 주소로 접속합니다.
 
 > 집 Wi-Fi 로 접속하면 내부망으로 도는 것인지
 > 진짜 외부에서 들어온 것인지 구분되지 않습니다.
 
 ### 관리자 대시보드
 
-```
-https://vmlab.본인도메인.com/admin
-```
+공개 주소 끝에 `/admin` 을 붙입니다.
 
 `ADMIN_USERNAME` / `ADMIN_INITIAL_PASSWORD` 로 로그인 →
 **즉시 비밀번호 변경**.
@@ -355,6 +440,7 @@ docker builder prune -a -f
 | 상황 | 규칙 |
 |---|---|
 | `vulnerable` 모드 실습 | **터널을 먼저 내린다** (`--down`), 호스트 전용 네트워크에서만 |
+| Quick Tunnel 사용 시 | 주소가 재시작마다 바뀐다. 문서에 적어두지 않는다 |
 | 외부 공개 | `secure` 모드만. 스크립트가 강제하지만 습관으로도 확인 |
 | 방화벽 | 8080 을 열지 않는다. 터널이 있으므로 불필요 |
 | 공유기 | 포트포워딩 설정하지 않는다 |
@@ -376,11 +462,15 @@ exit && 재접속
 # 3) 러너 (여기서 배포가 자동 시작됨)
 sudo ./scripts/setup_runner.sh
 
-# 4) 외부 공개
-./scripts/setup_tunnel.sh
+# 4) 외부 공개 — 도메인 없으면 --quick
+./scripts/setup_tunnel.sh --quick
 
 # 확인
 docker compose ps
 curl -s localhost:8080/healthz | jq
-./scripts/setup_tunnel.sh --status
+./scripts/setup_tunnel.sh --status    # 공개 주소 확인
 ```
+
+요구사항 #1~#3 은 여기서 다 끝납니다.
+도메인은 포트폴리오에 고정 주소를 싣고 싶어질 때 추가하면 되며,
+그때 앱이나 배포 구조는 전혀 바꿀 필요가 없습니다.

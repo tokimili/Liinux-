@@ -86,8 +86,31 @@ fi
 MODE="$(python3 -c "import json;print(json.load(open('/tmp/deploy_health.json'))['mode'])")"
 if [[ "${MODE}" != "secure" ]]; then
     fail "배포본이 secure 모드가 아닙니다 (mode=${MODE}) — 즉시 중단"
-    docker compose stop nginx cloudflared 2>/dev/null || true
+    docker compose stop nginx cloudflared quicktunnel 2>/dev/null || true
     exit 1
+fi
+
+# ---------------------------------------------------------------- Quick Tunnel 복구
+# Quick Tunnel(도메인 없이 쓰는 임시 터널)은 profile 밖에 있어서
+# 위의 `docker compose up` 이 건드리지 않는다. 그 결과 배포가 성공해도
+# 외부 접속만 조용히 끊긴 상태가 된다 — "배포했더니 주소가 안 열린다"의 원인.
+# 그래서 배포 전에 떠 있었다면 다시 올려준다.
+#
+# secure 검증 **뒤에** 두는 것이 중요하다. 순서가 바뀌면
+# 취약 빌드가 잠깐이라도 공개될 수 있다.
+if docker ps -a --format '{{.Names}}' | grep -qx vmlab-quicktunnel; then
+    if docker ps --format '{{.Names}}' | grep -qx vmlab-quicktunnel; then
+        log "Quick Tunnel 실행 중 — 유지"
+    else
+        log "Quick Tunnel 이 중단되어 있어 재기동합니다"
+        docker compose --profile quick up -d quicktunnel 2>/dev/null || \
+            fail "Quick Tunnel 재기동 실패 — ./scripts/setup_tunnel.sh --quick 로 다시 켜세요"
+    fi
+    # 주소는 재기동 시 바뀌므로 배포 로그에 남겨준다.
+    sleep 5
+    NEWURL="$(docker logs vmlab-quicktunnel 2>&1 \
+               | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)"
+    [[ -n "${NEWURL}" ]] && log "외부 접속 주소: ${NEWURL}"
 fi
 
 log "배포 성공 (mode=${MODE})"

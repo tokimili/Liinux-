@@ -15,7 +15,15 @@
 #   실습이 아니라 사고다. 아래에서 SECURITY_MODE 를 강제 검사한다.
 #
 # 사용법:
-#   ./scripts/setup_tunnel.sh            # 안내 + 토큰 입력 + 기동
+# ★ 두 가지 방식
+#   --quick  : 도메인·계정 없이 즉시 공개. https://<랜덤>.trycloudflare.com
+#              주소가 매번 바뀌고 재시작하면 사라진다. 시연·테스트용.
+#   (기본)   : Named Tunnel. 계정+도메인 필요. 고정 주소.
+#              포트폴리오 제출용 영구 주소가 필요할 때.
+#
+# 사용법:
+#   ./scripts/setup_tunnel.sh --quick    # 도메인 없이 바로 외부 공개
+#   ./scripts/setup_tunnel.sh            # 고정 주소 (토큰 입력)
 #   ./scripts/setup_tunnel.sh --status   # 현재 터널 상태만 확인
 #   ./scripts/setup_tunnel.sh --down     # 터널 내리기 (앱은 계속 동작)
 # ==========================================================================
@@ -31,25 +39,49 @@ warn() { printf '%s\n' "${C_YELLOW}  ▲ $*${C_RESET}"; }
 die()  { printf '%s\n' "${C_RED}  ✘ $*${C_RESET}" >&2; exit 1; }
 
 ACTION="up"
+QUICK=0
 case "${1:-}" in
   --status) ACTION="status" ;;
   --down)   ACTION="down" ;;
-  -h|--help) sed -n '2,23p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  --quick)  QUICK=1 ;;
+  -h|--help) sed -n '2,31p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
   "") ;;
   *) die "알 수 없는 옵션: $1" ;;
 esac
 
 command -v docker >/dev/null 2>&1 || die "docker 가 없습니다. vm_bootstrap.sh 를 먼저 실행하세요."
 
+# 실행 중인 터널 컨테이너 이름을 찾는다 (named 든 quick 이든)
+running_tunnel() {
+  docker ps --format '{{.Names}}' 2>/dev/null \
+    | grep -E '^vmlab-(tunnel|quicktunnel)$' | head -1
+}
+
+# quick 터널이 발급한 주소를 로그에서 뽑아낸다
+quick_url() {
+  docker logs vmlab-quicktunnel 2>&1 \
+    | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1
+}
+
 # --------------------------------------------------------------------------
 if [[ "${ACTION}" == "status" ]]; then
   step "터널 상태"
-  if docker ps --format '{{.Names}}' | grep -qx vmlab-tunnel; then
-    ok "터널 실행 중"
-    docker ps --filter name=vmlab-tunnel --format '  {{.Names}}  {{.Status}}'
+  NAME="$(running_tunnel)"
+  if [[ -n "${NAME}" ]]; then
+    ok "터널 실행 중: ${NAME}"
+    docker ps --filter "name=${NAME}" --format '  {{.Names}}  {{.Status}}'
+    if [[ "${NAME}" == "vmlab-quicktunnel" ]]; then
+      URL="$(quick_url)"
+      echo
+      if [[ -n "${URL}" ]]; then
+        printf '%s\n' "  공개 주소: ${C_BOLD}${C_GREEN}${URL}${C_RESET}"
+      else
+        warn "공개 주소를 로그에서 찾지 못했습니다 (아직 발급 중일 수 있음)"
+      fi
+    fi
     echo
     echo "  최근 로그:"
-    docker logs --tail 15 vmlab-tunnel 2>&1 | sed 's/^/    /'
+    docker logs --tail 15 "${NAME}" 2>&1 | sed 's/^/    /'
   else
     warn "터널이 실행 중이 아닙니다."
   fi
@@ -59,9 +91,16 @@ fi
 # --------------------------------------------------------------------------
 if [[ "${ACTION}" == "down" ]]; then
   step "터널 내리기"
-  docker compose --profile tunnel stop cloudflared 2>/dev/null || true
-  docker compose --profile tunnel rm -f cloudflared 2>/dev/null || true
-  ok "터널 중지됨 (앱은 계속 127.0.0.1:8080 에서 동작합니다)"
+  # 두 방식 모두 내린다. 어느 쪽이 떠 있었는지 사용자가 기억하지 못해도
+  # '--down 했으니 이제 외부 노출은 없다'가 보장되어야 한다.
+  for svc in cloudflared quicktunnel; do
+    docker compose --profile tunnel --profile quick stop "${svc}" 2>/dev/null || true
+    docker compose --profile tunnel --profile quick rm -f "${svc}" 2>/dev/null || true
+  done
+  if [[ -n "$(running_tunnel)" ]]; then
+    die "터널 컨테이너가 아직 살아 있습니다. 확인:  docker ps | grep vmlab-"
+  fi
+  ok "터널 중지됨 — 외부 노출 없음 (앱은 계속 127.0.0.1:8080 에서 동작)"
   exit 0
 fi
 
@@ -114,6 +153,89 @@ if docker ps --format '{{.Names}}' | grep -qx vmlab-nginx; then
   fi
 else
   warn "앱이 아직 실행 중이 아닙니다. 터널만 먼저 설정합니다."
+fi
+
+# ==========================================================================
+# Quick Tunnel 경로 — 도메인/계정 없이 즉시 공개
+#
+# 이 분기를 secure 점검 **뒤에** 둔 것이 의도다.
+# 간편한 경로라고 안전장치를 건너뛰게 하면, 정작 사고는
+# "빠르게 한 번 보여주려고" 켤 때 난다.
+# ==========================================================================
+if [[ ${QUICK} -eq 1 ]]; then
+  step "Quick Tunnel 기동 (도메인 불필요)"
+
+  # 노출 경로를 하나로 유지한다 — named 터널이 떠 있으면 먼저 정리
+  if docker ps --format '{{.Names}}' | grep -qx vmlab-tunnel; then
+    warn "고정 주소 터널이 실행 중입니다. 공개 경로를 하나로 유지하기 위해 중지합니다."
+    docker compose --profile tunnel stop cloudflared >/dev/null 2>&1 || true
+    docker compose --profile tunnel rm -f cloudflared >/dev/null 2>&1 || true
+  fi
+
+  # 재실행 시 이전 주소가 로그에 남아 혼동되는 것을 막기 위해 컨테이너를 새로 만든다
+  docker compose --profile quick rm -sf quicktunnel >/dev/null 2>&1 || true
+  docker compose --profile quick up -d quicktunnel || die "Quick Tunnel 기동 실패"
+  ok "quicktunnel 컨테이너 시작"
+
+  echo "  주소 발급 대기 중..."
+  URL=""
+  for _ in $(seq 1 30); do
+    sleep 2
+    URL="$(quick_url)"
+    [[ -n "${URL}" ]] && break
+    if ! docker ps --format '{{.Names}}' | grep -qx vmlab-quicktunnel; then
+      echo
+      docker logs --tail 30 vmlab-quicktunnel 2>&1 | sed 's/^/    /'
+      die "컨테이너가 종료되었습니다. 위 로그를 확인하세요."
+    fi
+  done
+
+  if [[ -z "${URL}" ]]; then
+    echo
+    docker logs --tail 30 vmlab-quicktunnel 2>&1 | sed 's/^/    /'
+    die "주소 발급 실패. 로그를 확인하세요:  docker logs -f vmlab-quicktunnel"
+  fi
+
+  echo
+  printf '%s\n' "${C_GREEN}${C_BOLD}  ╔══════════════════════════════════════════════════════════╗${C_RESET}"
+  printf '%s\n' "${C_GREEN}${C_BOLD}  ║  외부 접속 주소 (HTTPS 자동 적용)                        ║${C_RESET}"
+  printf '%s\n' "${C_GREEN}${C_BOLD}  ╚══════════════════════════════════════════════════════════╝${C_RESET}"
+  echo
+  printf '      %s\n' "${C_BOLD}${URL}${C_RESET}"
+  echo
+  printf '      %s\n' "관리자 대시보드: ${URL}/admin"
+  echo
+
+  cat <<EOF
+──────────────────────────────────────────────────────────────
+ ${C_BOLD}확인 방법${C_RESET}
+──────────────────────────────────────────────────────────────
+  휴대폰에서 ${C_BOLD}Wi-Fi 를 끄고(LTE)${C_RESET} 위 주소로 접속하세요.
+  집 Wi-Fi 로는 내부망인지 외부인지 구분되지 않습니다.
+
+  접속 후 대시보드의 '접속 로그'에 그 요청이 찍혀 있으면
+  요구사항 #2(외부 접속)와 #3(대시보드)이 함께 검증됩니다.
+  앱이 CF-Connecting-IP 를 최우선으로 읽으므로
+  Quick Tunnel 에서도 실제 접속자 IP 가 기록됩니다.
+
+──────────────────────────────────────────────────────────────
+ ${C_YELLOW}${C_BOLD}Quick Tunnel 의 한계${C_RESET}
+──────────────────────────────────────────────────────────────
+  • 주소가 ${C_BOLD}재시작할 때마다 바뀝니다${C_RESET} (영구 주소 아님)
+  • 컨테이너를 내리면 주소가 사라집니다
+  • Cloudflare 가 가용성을 보장하지 않습니다 (시연/테스트용)
+
+  포트폴리오에 고정 주소를 싣고 싶어지면 그때 도메인을 연결하고
+  ./scripts/setup_tunnel.sh (옵션 없이) 를 실행하면 됩니다.
+  앱과 배포 구조는 전혀 바꾸지 않아도 됩니다.
+
+──────────────────────────────────────────────────────────────
+  주소 다시 보기 : ./scripts/setup_tunnel.sh --status
+  내리기         : ./scripts/setup_tunnel.sh --down
+──────────────────────────────────────────────────────────────
+
+EOF
+  exit 0
 fi
 
 # --------------------------------------------------------------------------
