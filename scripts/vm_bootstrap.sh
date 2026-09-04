@@ -65,6 +65,16 @@ apt-get install -y -qq \
     ca-certificates curl gnupg lsb-release \
     git jq ufw fail2ban unattended-upgrades \
     htop net-tools dnsutils
+
+# python3-systemd 가 반드시 필요한 이유:
+#   Ubuntu 24.04 부터 rsyslog 가 기본 설치되지 않아 /var/log/auth.log 가
+#   없고, SSH 인증 로그는 systemd journal 에만 남는다.
+#   그래서 jail.local 에서 backend=systemd 를 쓰는데, fail2ban 이 journal 을
+#   읽으려면 이 파이썬 바인딩이 있어야 한다.
+#   없으면 fail2ban 서비스는 뜨지만 sshd jail 이 조용히 죽어서
+#   "방화벽은 켜져 있는데 무차별 대입이 전혀 차단되지 않는" 상태가 된다.
+apt-get install -y -qq python3-systemd || \
+    warn "python3-systemd 설치 실패 — fail2ban 이 journal 을 읽지 못할 수 있습니다"
 ok "기본 도구 설치 완료"
 
 # ---------------------------------------------------------------- Docker
@@ -81,15 +91,34 @@ else
         chmod a+r /etc/apt/keyrings/docker.asc
     fi
 
+    # 코드네임을 그대로 쓰기 전에 Docker 저장소가 그 버전을 지원하는지 본다.
+    # 갓 나온 우분투(예: 26.04 resolute)는 Docker 반영이 며칠~몇 주 늦는데,
+    # 그 상태로 apt update 를 하면 404 만 뜨고 원인을 알기 어렵다.
+    # 미지원이면 최신 LTS 저장소로 폴백한다(패키지 호환성은 유지된다).
+    CODENAME="$(. /etc/os-release && echo "${VERSION_CODENAME}")"
+    echo "  감지된 배포판: ${CODENAME} ($(. /etc/os-release && echo "${VERSION}"))"
+
+    if curl -fsSL --max-time 15 \
+         "https://download.docker.com/linux/ubuntu/dists/${CODENAME}/stable/binary-$(dpkg --print-architecture)/Packages" \
+         2>/dev/null | grep -q "^Package: docker-ce$"; then
+        ok "Docker 공식 저장소가 ${CODENAME} 를 지원합니다"
+        REPO_CODENAME="${CODENAME}"
+    else
+        # noble(24.04) 은 장기 지원 LTS 라 폴백 대상으로 안전하다.
+        REPO_CODENAME="noble"
+        warn "Docker 저장소에 ${CODENAME} 이 아직 없습니다 → ${REPO_CODENAME} 저장소로 대체합니다"
+    fi
+
     echo "deb [arch=$(dpkg --print-architecture) \
 signed-by=/etc/apt/keyrings/docker.asc] \
-https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "${VERSION_CODENAME}") stable" \
+https://download.docker.com/linux/ubuntu ${REPO_CODENAME} stable" \
         > /etc/apt/sources.list.d/docker.list
 
     apt-get update -qq
     apt-get install -y -qq \
         docker-ce docker-ce-cli containerd.io \
-        docker-buildx-plugin docker-compose-plugin
+        docker-buildx-plugin docker-compose-plugin \
+        || die "Docker 설치 실패 — /etc/apt/sources.list.d/docker.list 를 확인하세요"
     ok "Docker 설치 완료 ($(docker --version | cut -d, -f1))"
 fi
 
@@ -176,10 +205,29 @@ else
 fi
 
 systemctl enable --now fail2ban >/dev/null 2>&1 || true
-sleep 2
+sleep 3
+
+# 서비스가 "실행 중"인 것만 보면 안 된다.
+# fail2ban 은 journal 을 못 읽어도 서비스 자체는 정상 기동하고,
+# sshd jail 만 조용히 실패한다. 그래서 jail 목록을 직접 확인한다.
 if fail2ban-client status >/dev/null 2>&1; then
-    ok "fail2ban 동작 중"
-    fail2ban-client status | sed 's/^/    /'
+    if fail2ban-client status 2>/dev/null | grep -q "sshd"; then
+        ok "fail2ban 동작 중 — sshd jail 활성"
+        fail2ban-client status sshd 2>/dev/null | sed 's/^/    /' || true
+    else
+        warn "fail2ban 은 떴지만 sshd jail 이 올라오지 않았습니다!"
+        warn "  → SSH 무차별 대입이 차단되지 않는 상태입니다. 확인:"
+        echo  "     sudo journalctl -u fail2ban -n 30 --no-pager"
+        echo  "     sudo fail2ban-client -d | head"
+        # journal 백엔드 실패가 가장 흔한 원인이므로 자동 복구를 시도한다.
+        if ! dpkg -s python3-systemd >/dev/null 2>&1; then
+            warn "  python3-systemd 가 없습니다. 재설치를 시도합니다."
+            apt-get install -y -qq python3-systemd && systemctl restart fail2ban && sleep 3
+            fail2ban-client status 2>/dev/null | grep -q "sshd" \
+                && ok "복구 성공 — sshd jail 활성" \
+                || warn "복구 실패 — 수동 확인이 필요합니다"
+        fi
+    fi
 else
     warn "fail2ban 상태를 확인할 수 없습니다: systemctl status fail2ban"
 fi
@@ -239,7 +287,12 @@ check "docker compose v2 플러그인" "docker compose version"
 check "docker 데몬 실행 중"        "docker info"
 check "git 설치됨"                 "command -v git"
 check "ufw 활성화됨"               "ufw status | grep -q 'Status: active'"
+check "ufw 인바운드 기본 차단"     "ufw status verbose | grep -q 'deny (incoming)'"
+check "SSH 접근 허용됨"            "ufw status | grep -qiE 'ssh|22'"
 check "fail2ban 실행 중"           "systemctl is-active --quiet fail2ban"
+# 서비스 상태와 별개로 jail 이 실제로 떠 있는지 본다.
+# 이것이 실패하면 SSH 무차별 대입 차단이 동작하지 않는다.
+check "fail2ban sshd jail 활성"    "fail2ban-client status | grep -q sshd"
 
 # 컨테이너가 실제로 뜨는지 확인 — Docker 설치의 진짜 검증이다
 step "Docker 동작 테스트 (hello-world)"

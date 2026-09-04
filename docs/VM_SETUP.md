@@ -46,7 +46,7 @@
 | CPU | 2 core | 4 core | Docker 빌드가 CPU 를 많이 씀 |
 | RAM | 4 GB | 8 GB | MariaDB + 러너 + 빌드 동시 실행 |
 | 디스크 | 40 GB | 60 GB | 이미지 레이어가 빠르게 쌓임 |
-| OS | Ubuntu 22.04 LTS | Ubuntu 24.04 LTS | |
+| OS | Ubuntu 22.04 LTS | Ubuntu 24.04 / 26.04 LTS | 26.04(resolute) 확인됨 |
 
 > 디스크를 20GB 로 잡으면 배포 몇 번 만에 가득 찹니다.
 > Docker 는 이전 이미지를 자동으로 지우지 않습니다.
@@ -116,6 +116,25 @@ sudo ./scripts/vm_bootstrap.sh
 마지막에 검증 6항목 + `hello-world` 실제 실행 결과가 나옵니다.
 
 **끝나면 반드시 재로그인**하세요. `docker` 그룹 권한이 적용됩니다.
+
+#### Ubuntu 24.04 이상에서 특히 중요한 부분
+
+24.04 부터 `rsyslog` 가 기본 설치되지 않아 **`/var/log/auth.log` 파일이 없습니다.**
+SSH 인증 로그가 systemd journal 에만 남기 때문에, fail2ban 이
+journal 을 읽을 수 있어야 합니다(`backend = systemd` + `python3-systemd`).
+
+이 조건이 빠지면 **fail2ban 서비스는 정상 실행되지만 sshd jail 만 조용히
+죽어서, 무차별 대입이 전혀 차단되지 않는 상태**가 됩니다.
+"방화벽은 켜져 있으니 안전하다"고 착각하기 가장 쉬운 지점입니다.
+
+스크립트가 `python3-systemd` 를 설치하고, 검증 단계에서
+서비스 상태가 아니라 **jail 활성 여부**를 직접 확인합니다.
+직접 점검하려면:
+
+```bash
+sudo fail2ban-client status          # sshd 가 목록에 있어야 정상
+sudo fail2ban-client status sshd     # 감시 중인 로그 경로 확인
+```
 
 ```bash
 exit
@@ -446,6 +465,7 @@ docker builder prune -a -f
 | 공유기 | 포트포워딩 설정하지 않는다 |
 | `.env` | 절대 커밋하지 않는다 (`.gitignore` 에 등록됨), 권한 600 |
 | 최초 비밀번호 | 첫 로그인 후 즉시 변경 |
+| SSH 인증 | 공개키로 전환 후 `PasswordAuthentication no` 권장 |
 
 ---
 
