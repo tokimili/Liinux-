@@ -143,7 +143,17 @@ services:
       # 변수명은 cloudflared 가 네이티브로 읽는 TUNNEL_TOKEN 으로 통일한다.
       # (GitHub Secret 이름은 CLOUDFLARE_TUNNEL_TOKEN 이지만,
       #  deploy.yml 이 .env 에 기록할 때 TUNNEL_TOKEN 으로 써 넣는다.)
-      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?TUNNEL_TOKEN 을 .env 에 설정하세요 (scripts/setup_tunnel.sh 참고)}
+      #
+      # ★ 여기에 `${TUNNEL_TOKEN:?...}` (required 문법)을 쓰면 안 된다.
+      #   compose 의 변수 보간은 **파일을 파싱하는 시점에 전체에 적용**되며,
+      #   profile 로 제외된 서비스도 예외가 아니다. 따라서 터널을 전혀
+      #   쓰지 않는 `docker compose build web` 조차 이 줄 때문에 실패한다.
+      #   실제로 배포가 '이미지 빌드' 단계에서 이 에러로 죽었다:
+      #     error while interpolating services.cloudflared.environment.TUNNEL_TOKEN:
+      #     required variable TUNNEL_TOKEN is missing a value
+      #   토큰 검증은 파일이 아니라 터널을 켜는 스크립트에서 한다
+      #   (scripts/setup_tunnel.sh 가 실행 전에 확인).
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
       # 터널이 바라볼 로컬 서비스는 Cloudflare 대시보드에서 지정한다:
       #   Public hostname → Service: http://nginx:8080
       TUNNEL_METRICS: 0.0.0.0:2000
