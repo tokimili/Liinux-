@@ -29,6 +29,10 @@
 # ==========================================================================
 set -Eeuo pipefail
 
+# cd 하기 전에 스크립트의 절대 경로를 확보한다 (안내 메시지에서 그대로 쓴다)
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+ARGS=("$@")
+
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 C_RESET=$'\033[0m'; C_BOLD=$'\033[1m'
@@ -51,12 +55,128 @@ esac
 
 command -v docker >/dev/null 2>&1 || die "docker 가 없습니다. vm_bootstrap.sh 를 먼저 실행하세요."
 
+# --------------------------------------------------------------------------
+# docker 를 어떻게 부를지 정한다 (그냥 docker / sudo docker)
+#
+# ★ 왜 필요한가
+#   vm_bootstrap.sh 가 사용자를 docker 그룹에 넣어도, 그룹 변경은
+#   **다시 로그인해야** 적용된다. 그래서 실제로는 `sudo docker` 로
+#   쓰고 있는 상태가 흔하다.
+#   이때 스크립트가 그냥 `docker ps` 를 부르면 권한 오류가 나는데,
+#   본문의 호출들이 `2>/dev/null || true` 로 감싸여 있어서
+#   "앱이 실행 중이 아닙니다" 같은 **엉뚱한 진단**으로 이어진다.
+#   호출 방식을 여기서 한 번만 정하고 dk() 로 통일한다.
+# --------------------------------------------------------------------------
+DOCKER=(docker)
+if ! docker info >/dev/null 2>&1; then
+  if sudo -n docker info >/dev/null 2>&1 || sudo docker info >/dev/null 2>&1; then
+    DOCKER=(sudo docker)
+  else
+    die "docker 를 실행할 수 없습니다. 확인:  sudo docker ps"
+  fi
+fi
+dk() { "${DOCKER[@]}" "$@"; }
+
+# --------------------------------------------------------------------------
+# 배포가 실제로 이루어진 디렉터리를 찾는다
+#
+# ★ 여기서 한 번 크게 헤맸다 (같은 함정을 diag_env.sh 에서 이미 겪었다)
+#   사용자가 `git clone` 한 ~/Liinux- 에는 .env 가 **없다**.
+#   GitHub Actions 의 self-hosted 러너는 actions/checkout 으로
+#   자기 작업 디렉터리에 소스를 새로 내려받아 거기서 배포하므로,
+#   .env 와 실행 중인 스택의 컨텍스트는 이 경로에 있다:
+#       /opt/actions-runner/_work/<repo>/<repo>/.env
+#   그래서 스크립트를 clone 한 곳에서 실행해도 동작하도록,
+#   .env 가 있는 작업 디렉터리를 찾아 그쪽으로 이동한다.
+# --------------------------------------------------------------------------
+have_env() {
+  # 디렉터리 권한 때문에 일반 사용자에게 안 보일 수 있어 sudo 로도 한 번 본다
+  [[ -f "$1/.env" ]] || sudo -n test -f "$1/.env" 2>/dev/null
+}
+
+# ★ 이 함수는 결과를 echo 로 돌려주지 않고 전역 변수에 직접 쓴다.
+#   `WORKDIR="$(find_workdir)"` 로 만들면 함수가 **서브셸**에서 돌아서
+#   탐색 경로를 모아둔 SEARCHED 가 부모로 전달되지 않는다.
+#   (실패 안내에서 "어디를 찾아봤는지" 보여주는 게 이 스크립트의 핵심 UX다)
+SEARCHED=""
+WORKDIR=""
+find_workdir() {
+  local base cand
+  # 현재 디렉터리에 .env 가 있으면 그대로 쓴다 (수동 운영/로컬 개발)
+  SEARCHED="${SEARCHED}
+    ${PWD}"
+  if have_env "."; then
+    WORKDIR="${PWD}"
+    return 0
+  fi
+  for base in /opt/actions-runner "${HOME}/actions-runner" /home/*/actions-runner; do
+    [[ -d "${base}/_work" ]] || sudo -n test -d "${base}/_work" 2>/dev/null || continue
+    # 저장소 이름을 하드코딩하지 않는다 — _work/<repo>/<repo> 를 훑는다
+    #
+    # ★ glob 만 쓰면 안 된다: 러너를 /opt 에 설치하면 _work 의 권한이
+    #   러너 사용자 전용이라 일반 사용자 셸에서는 `*` 가 아예 확장되지
+    #   않는다(확장 실패 → 리터럴 문자열). 그러면 디렉터리가 분명히
+    #   있는데도 "못 찾았다"고 나온다. sudo 로 목록을 받아 보완한다.
+    local listing
+    listing="$(ls -d "${base}"/_work/*/* 2>/dev/null || true)"
+    if [[ -z "${listing}" ]]; then
+      listing="$(sudo -n ls -d "${base}"/_work/*/* 2>/dev/null || true)"
+    fi
+    [[ -n "${listing}" ]] || continue
+
+    while IFS= read -r cand; do
+      [[ -n "${cand}" ]] || continue
+      # compose 파일이 있는 곳만 후보로 본다 (_work 안에는 캐시 등 잡폴더도 있다)
+      [[ -f "${cand}/docker-compose.yml" ]] \
+        || sudo -n test -f "${cand}/docker-compose.yml" 2>/dev/null \
+        || continue
+      SEARCHED="${SEARCHED}
+    ${cand}"
+      if have_env "${cand}"; then
+        WORKDIR="${cand}"
+        return 0
+      fi
+    done <<< "${listing}"
+  done
+  return 1
+}
+
+find_workdir || true
+if [[ -n "${WORKDIR}" && "${WORKDIR}" != "${PWD}" ]]; then
+  warn "여기에는 .env 가 없습니다. 배포가 만든 작업 디렉터리로 이동합니다:"
+  printf '      %s\n' "${WORKDIR}"
+  # 러너 작업 디렉터리는 러너 사용자 소유라 일반 사용자가 들어가지 못할 수 있다.
+  # 그때는 "왜 안 되는지 + 어떻게 하면 되는지"를 명확히 알려준다.
+  if ! cd "${WORKDIR}" 2>/dev/null; then
+    printf '%s\n' "${C_RED}  ✘ 그 디렉터리에 들어갈 권한이 없습니다.${C_RESET}" >&2
+    cat >&2 <<EOF
+
+  러너 작업 디렉터리는 러너 사용자 소유입니다.
+  아래처럼 sudo 로 다시 실행하세요:
+
+      sudo ${SCRIPT_PATH} ${ARGS[*]:-}
+
+EOF
+    exit 1
+  fi
+fi
+
+# .env 를 읽는다. 배포가 chmod 600 으로 만들기 때문에
+# 소유자가 러너 사용자이면 일반 사용자로는 못 읽는 경우가 있다 → sudo 폴백.
+env_cat() {
+  if [[ -r .env ]]; then
+    cat .env
+  else
+    sudo cat .env
+  fi
+}
+
 # 실행 중인 터널 컨테이너 이름을 찾는다 (named 든 quick 이든)
 # ★ `|| true` 필수: 터널이 안 떠 있으면 grep 이 1 을 반환하고,
 #   호출부의 `NAME="$(running_tunnel)"` 대입문이 그 종료코드를 물려받아
 #   set -e 가 스크립트를 죽인다. "아직 안 켜진 상태" 는 정상이지 에러가 아니다.
 running_tunnel() {
-  docker ps --format '{{.Names}}' 2>/dev/null \
+  dk ps --format '{{.Names}}' 2>/dev/null \
     | grep -E '^vmlab-(tunnel|quicktunnel)$' | head -1 || true
 }
 
@@ -64,7 +184,7 @@ running_tunnel() {
 # `|| true` 필수: 주소 발급 전에는 로그에 URL 이 없어 grep 이 1 을 낸다.
 # 발급 대기 루프가 바로 이 "아직 없음" 상태를 기대하고 도는 구조다.
 quick_url() {
-  docker logs vmlab-quicktunnel 2>&1 \
+  dk logs vmlab-quicktunnel 2>&1 \
     | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true
 }
 
@@ -74,7 +194,7 @@ if [[ "${ACTION}" == "status" ]]; then
   NAME="$(running_tunnel)"
   if [[ -n "${NAME}" ]]; then
     ok "터널 실행 중: ${NAME}"
-    docker ps --filter "name=${NAME}" --format '  {{.Names}}  {{.Status}}'
+    dk ps --filter "name=${NAME}" --format '  {{.Names}}  {{.Status}}'
     if [[ "${NAME}" == "vmlab-quicktunnel" ]]; then
       URL="$(quick_url)"
       echo
@@ -86,7 +206,7 @@ if [[ "${ACTION}" == "status" ]]; then
     fi
     echo
     echo "  최근 로그:"
-    docker logs --tail 15 "${NAME}" 2>&1 | sed 's/^/    /'
+    dk logs --tail 15 "${NAME}" 2>&1 | sed 's/^/    /'
   else
     warn "터널이 실행 중이 아닙니다."
   fi
@@ -99,11 +219,11 @@ if [[ "${ACTION}" == "down" ]]; then
   # 두 방식 모두 내린다. 어느 쪽이 떠 있었는지 사용자가 기억하지 못해도
   # '--down 했으니 이제 외부 노출은 없다'가 보장되어야 한다.
   for svc in cloudflared quicktunnel; do
-    docker compose --profile tunnel --profile quick stop "${svc}" 2>/dev/null || true
-    docker compose --profile tunnel --profile quick rm -f "${svc}" 2>/dev/null || true
+    dk compose --profile tunnel --profile quick stop "${svc}" 2>/dev/null || true
+    dk compose --profile tunnel --profile quick rm -f "${svc}" 2>/dev/null || true
   done
   if [[ -n "$(running_tunnel)" ]]; then
-    die "터널 컨테이너가 아직 살아 있습니다. 확인:  docker ps | grep vmlab-"
+    die "터널 컨테이너가 아직 살아 있습니다. 확인:  ${DOCKER[*]} ps | grep vmlab-"
   fi
   ok "터널 중지됨 — 외부 노출 없음 (앱은 계속 127.0.0.1:8080 에서 동작)"
   exit 0
@@ -116,14 +236,32 @@ printf '%s\n' "${C_BOLD}${C_CYAN}═══════════════�
 # --------------------------------------------------------------------------
 step "안전 점검 — secure 모드 확인"
 # --------------------------------------------------------------------------
-[[ -f .env ]] || die ".env 가 없습니다. 먼저 배포하거나  ./scripts/gen_secrets.sh --env  를 실행하세요."
+if [[ -z "${WORKDIR}" ]]; then
+  printf '%s\n' "${C_RED}  ✘ .env 를 찾지 못했습니다.${C_RESET}" >&2
+  cat >&2 <<EOF
+
+  찾아본 경로:${SEARCHED}
+
+  .env 는 배포가 **러너 작업 디렉터리**에 만듭니다.
+  (git clone 한 ~/Liinux- 가 아닙니다)
+
+  다음 중 하나를 하세요:
+    1) 배포를 한 번 성공시킨다 (git push 또는 Actions 에서 Run workflow)
+    2) 이 VM 에서 수동 운영할 .env 를 만든다:
+         ./scripts/gen_secrets.sh --env
+
+  현재 상태 확인:  ./scripts/diag_env.sh
+
+EOF
+  exit 1
+fi
 
 # .env 를 source 하지 않는 이유: 값에 특수문자가 있으면 셸이 해석해버린다.
 # 필요한 키만 문자열로 뽑아 쓴다.
 # `|| true` 필수: 해당 키가 .env 에 아직 없으면 grep 이 1 을 낸다.
 # 호출부는 빈 문자열을 받아 안내 메시지를 띄우도록 설계돼 있는데,
 # 그 안내에 도달하기 전에 스크립트가 죽어버린다 (TOKEN 미설정이 정확히 이 경우).
-env_get() { grep -E "^${1}=" .env 2>/dev/null | tail -1 | cut -d= -f2- || true ; }
+env_get() { env_cat 2>/dev/null | grep -E "^${1}=" | tail -1 | cut -d= -f2- || true ; }
 
 MODE="$(env_get SECURITY_MODE)"
 echo "  현재 SECURITY_MODE = ${MODE:-(미설정)}"
@@ -146,7 +284,7 @@ ok "secure 모드 확인됨 — 공개해도 안전한 빌드입니다"
 
 # 실행 중인 앱이 정말 secure 인지 한 번 더 확인한다.
 # .env 는 secure 인데 컨테이너가 옛날 vulnerable 이미지로 떠 있을 수 있다.
-if docker ps --format '{{.Names}}' | grep -qx vmlab-nginx; then
+if dk ps --format '{{.Names}}' | grep -qx vmlab-nginx; then
   RUNTIME_MODE="$(curl -fsS --max-time 5 http://127.0.0.1:8080/healthz 2>/dev/null \
                    | grep -o '"mode"[[:space:]]*:[[:space:]]*"[^"]*"' \
                    | cut -d'"' -f4 || true)"
@@ -174,15 +312,15 @@ if [[ ${QUICK} -eq 1 ]]; then
   step "Quick Tunnel 기동 (도메인 불필요)"
 
   # 노출 경로를 하나로 유지한다 — named 터널이 떠 있으면 먼저 정리
-  if docker ps --format '{{.Names}}' | grep -qx vmlab-tunnel; then
+  if dk ps --format '{{.Names}}' | grep -qx vmlab-tunnel; then
     warn "고정 주소 터널이 실행 중입니다. 공개 경로를 하나로 유지하기 위해 중지합니다."
-    docker compose --profile tunnel stop cloudflared >/dev/null 2>&1 || true
-    docker compose --profile tunnel rm -f cloudflared >/dev/null 2>&1 || true
+    dk compose --profile tunnel stop cloudflared >/dev/null 2>&1 || true
+    dk compose --profile tunnel rm -f cloudflared >/dev/null 2>&1 || true
   fi
 
   # 재실행 시 이전 주소가 로그에 남아 혼동되는 것을 막기 위해 컨테이너를 새로 만든다
-  docker compose --profile quick rm -sf quicktunnel >/dev/null 2>&1 || true
-  docker compose --profile quick up -d quicktunnel || die "Quick Tunnel 기동 실패"
+  dk compose --profile quick rm -sf quicktunnel >/dev/null 2>&1 || true
+  dk compose --profile quick up -d quicktunnel || die "Quick Tunnel 기동 실패"
   ok "quicktunnel 컨테이너 시작"
 
   echo "  주소 발급 대기 중..."
@@ -191,17 +329,17 @@ if [[ ${QUICK} -eq 1 ]]; then
     sleep 2
     URL="$(quick_url)"
     [[ -n "${URL}" ]] && break
-    if ! docker ps --format '{{.Names}}' | grep -qx vmlab-quicktunnel; then
+    if ! dk ps --format '{{.Names}}' | grep -qx vmlab-quicktunnel; then
       echo
-      docker logs --tail 30 vmlab-quicktunnel 2>&1 | sed 's/^/    /'
+      dk logs --tail 30 vmlab-quicktunnel 2>&1 | sed 's/^/    /'
       die "컨테이너가 종료되었습니다. 위 로그를 확인하세요."
     fi
   done
 
   if [[ -z "${URL}" ]]; then
     echo
-    docker logs --tail 30 vmlab-quicktunnel 2>&1 | sed 's/^/    /'
-    die "주소 발급 실패. 로그를 확인하세요:  docker logs -f vmlab-quicktunnel"
+    dk logs --tail 30 vmlab-quicktunnel 2>&1 | sed 's/^/    /'
+    die "주소 발급 실패. 로그를 확인하세요:  ${DOCKER[*]} logs -f vmlab-quicktunnel"
   fi
 
   echo
@@ -285,11 +423,18 @@ GUIDE
 
   # .env 갱신 — 기존 줄을 지우고 새로 추가한다.
   # sed -i 로 치환하지 않는 이유: 토큰에 / 가 들어 있어 구분자가 깨진다.
-  cp .env .env.bak
-  grep -v '^TUNNEL_TOKEN=' .env.bak > .env
-  printf 'TUNNEL_TOKEN=%s\n' "${TOKEN}" >> .env
-  chmod 600 .env
-  rm -f .env.bak
+  # 배포가 만든 .env 는 600 이고 소유자가 러너 사용자일 수 있어 sudo 폴백을 둔다.
+  TMP_ENV="$(mktemp)"
+  env_cat | grep -v '^TUNNEL_TOKEN=' > "${TMP_ENV}" || true
+  printf 'TUNNEL_TOKEN=%s\n' "${TOKEN}" >> "${TMP_ENV}"
+  if [[ -w .env ]]; then
+    cat "${TMP_ENV}" > .env
+    chmod 600 .env
+  else
+    sudo cp "${TMP_ENV}" .env
+    sudo chmod 600 .env
+  fi
+  rm -f "${TMP_ENV}"
   ok ".env 에 토큰 저장 (권한 $(stat -c %a .env))"
 
   echo
@@ -307,21 +452,21 @@ step "터널 기동"
 # --------------------------------------------------------------------------
 # --profile tunnel 이 필요하다. 이 프로파일 없이는 cloudflared 가 뜨지 않는데,
 # 그게 의도된 안전장치다 (docker-compose.yml 주석 참고).
-docker compose --profile tunnel up -d cloudflared || die "터널 기동 실패"
+dk compose --profile tunnel up -d cloudflared || die "터널 기동 실패"
 ok "cloudflared 컨테이너 시작"
 
 echo "  연결 수립 대기 중..."
 CONNECTED=0
 for _ in $(seq 1 20); do
   sleep 2
-  if docker logs vmlab-tunnel 2>&1 | grep -qi "Registered tunnel connection\|Connection .* registered"; then
+  if dk logs vmlab-tunnel 2>&1 | grep -qi "Registered tunnel connection\|Connection .* registered"; then
     CONNECTED=1
     break
   fi
   # 토큰이 틀리면 빨리 실패하므로 즉시 잡아낸다
-  if docker logs vmlab-tunnel 2>&1 | grep -qi "Provided Tunnel token is not valid\|failed to parse token"; then
+  if dk logs vmlab-tunnel 2>&1 | grep -qi "Provided Tunnel token is not valid\|failed to parse token"; then
     echo
-    docker logs --tail 20 vmlab-tunnel 2>&1 | sed 's/^/    /'
+    dk logs --tail 20 vmlab-tunnel 2>&1 | sed 's/^/    /'
     die "터널 토큰이 유효하지 않습니다. .env 의 TUNNEL_TOKEN 을 다시 확인하세요."
   fi
 done
@@ -329,15 +474,15 @@ done
 if [[ ${CONNECTED} -eq 1 ]]; then
   ok "Cloudflare 엣지에 연결됨"
 else
-  warn "연결 확인 실패 — 로그를 확인하세요:  docker logs -f vmlab-tunnel"
+  warn "연결 확인 실패 — 로그를 확인하세요:  ${DOCKER[*]} logs -f vmlab-tunnel"
 fi
 
 # --------------------------------------------------------------------------
 step "결과"
 # --------------------------------------------------------------------------
-docker ps --filter name=vmlab-tunnel --format '  {{.Names}}  {{.Status}}'
+dk ps --filter name=vmlab-tunnel --format '  {{.Names}}  {{.Status}}'
 echo
-docker logs --tail 10 vmlab-tunnel 2>&1 | sed 's/^/    /'
+dk logs --tail 10 vmlab-tunnel 2>&1 | sed 's/^/    /'
 
 cat <<EOF
 
@@ -361,7 +506,7 @@ cat <<EOF
 ──────────────────────────────────────────────────────────────
   상태  : ./scripts/setup_tunnel.sh --status
   중지  : ./scripts/setup_tunnel.sh --down
-  로그  : docker logs -f vmlab-tunnel
+  로그  : ${DOCKER[*]} logs -f vmlab-tunnel
 
 ──────────────────────────────────────────────────────────────
  ${C_YELLOW}${C_BOLD}잊지 마세요${C_RESET}

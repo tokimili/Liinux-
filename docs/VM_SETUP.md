@@ -410,6 +410,19 @@ https://github.com/tokimili/Liinux-/actions
 
 이게 전부입니다. 30초 정도 뒤에 주소가 출력됩니다:
 
+> **참고 — 실행 위치는 신경쓰지 않아도 됩니다.**
+> `git clone` 한 `~/Liinux-` 에는 `.env` 가 없습니다(배포는 러너의 작업
+> 디렉터리에서 이뤄집니다). 스크립트가 `.env` 가 있는 작업 디렉터리를
+> 스스로 찾아 이동하고, 아래처럼 알려줍니다:
+>
+> ```
+>   ▲ 여기에는 .env 가 없습니다. 배포가 만든 작업 디렉터리로 이동합니다:
+>       /opt/actions-runner/_work/Liinux-/Liinux-
+> ```
+>
+> 만약 `그 디렉터리에 들어갈 권한이 없습니다` 가 나오면 안내대로
+> `sudo` 를 붙여 다시 실행하세요.
+
 ```
   ╔══════════════════════════════════════════════════════════╗
   ║  외부 접속 주소 (HTTPS 자동 적용)                        ║
@@ -600,6 +613,25 @@ sudo journalctl -u 'actions.runner.*' -n 50 --no-pager
 
 - 터널(HTTPS)로 접속하거나
 - 로컬 테스트라면 `.env` 에서 `SESSION_COOKIE_SECURE=false`
+
+### `setup_tunnel.sh` 가 `.env 를 찾지 못했습니다` 로 멈춤
+
+`.env` 는 **배포가 러너의 작업 디렉터리에 만듭니다.**
+`git clone` 한 `~/Liinux-` 에는 없습니다 — 러너가 `actions/checkout` 으로
+자기 작업 디렉터리에 소스를 새로 내려받아 거기서 배포하기 때문입니다.
+
+```
+/opt/actions-runner/_work/Liinux-/Liinux-/.env     ← 여기
+~/Liinux-/.env                                     ← 없음
+```
+
+스크립트는 이 경로를 자동으로 찾습니다. 그래도 못 찾았다면 둘 중 하나입니다.
+
+- **배포를 아직 한 번도 성공시키지 않았다** → Actions 에서 배포를 돌리세요.
+- **수동으로 운영하려는 것이다** → `./scripts/gen_secrets.sh --env`
+
+에러 메시지에 "찾아본 경로" 목록이 함께 출력되므로 그걸 먼저 보세요.
+`./scripts/diag_env.sh` 로 현재 `.env` 상태를 점검할 수도 있습니다.
 
 ### 터널이 HEALTHY 가 아님
 
