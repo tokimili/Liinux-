@@ -38,8 +38,40 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 """
 
 
+#: MariaDB 가 "자격증명이 틀렸다"고 답한 경우의 오류번호.
+#  1045 = Access denied for user, 1044/1049 = 해당 DB 접근/존재 불가.
+#  이건 기다려서 해결되는 문제가 아니므로 재시도하면 안 된다.
+_AUTH_ERRNOS = (1044, 1045, 1049)
+
+_AUTH_HINT = """
+[!] DB 인증 실패 — 비밀번호가 맞지 않습니다.
+
+  가장 흔한 원인: **DB 볼륨에 남아 있는 옛 비밀번호**
+
+  MariaDB 는 MARIADB_PASSWORD 환경변수를 '볼륨이 빈 상태로 처음
+  초기화될 때' 만 사용합니다. 볼륨(db_data)이 이미 존재하면 환경변수는
+  완전히 무시되고, 볼륨 안에 저장된 옛 비밀번호가 계속 쓰입니다.
+
+  따라서 GitHub Secrets 의 DB_PASSWORD 를 바꿨다면 볼륨을 비워야 합니다:
+
+      cd /opt/actions-runner/_work/Liinux-/Liinux-   # 러너 작업 디렉터리
+      sudo docker compose down -v                    # -v 로 볼륨까지 삭제
+      # 그다음 배포를 다시 실행
+
+  ⚠️ `-v` 는 DB 데이터를 모두 지웁니다. 초기 구축 중이라면 문제없습니다.
+     보존할 데이터가 있다면 먼저 백업하세요:
+        docker compose exec db mariadb-dump -uroot -p"$MYSQL_ROOT_PASSWORD" \\
+          --all-databases > backup.sql
+"""
+
+
 def connect(cfg, retries: int = 30, delay: float = 2.0):
-    """DB 컨테이너가 아직 준비되지 않았을 수 있으므로 재시도한다."""
+    """DB 컨테이너가 아직 준비되지 않았을 수 있으므로 재시도한다.
+
+    단, 인증 실패는 재시도하지 않는다. 초기 버전은 1045(Access denied)도
+    30회 60초 동안 재시도한 뒤 원인이 불분명한 채로 죽었다. 비밀번호가
+    틀린 것은 기다려서 고쳐지지 않으므로 즉시 원인을 알려주고 끝낸다.
+    """
     last = None
     for attempt in range(1, retries + 1):
         try:
@@ -51,6 +83,9 @@ def connect(cfg, retries: int = 30, delay: float = 2.0):
             )
         except pymysql.err.OperationalError as exc:
             last = exc
+            if exc.args and exc.args[0] in _AUTH_ERRNOS:
+                print(_AUTH_HINT, file=sys.stderr)
+                raise SystemExit(f"[!] DB 인증 실패({exc.args[0]}): {exc.args[1]}") from exc
             print(f"    DB 연결 대기 {attempt}/{retries} … ({exc.args[0]})")
             time.sleep(delay)
     raise SystemExit(f"[!] DB 연결 실패: {last}")
