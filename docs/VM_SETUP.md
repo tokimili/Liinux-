@@ -150,6 +150,67 @@ docker ps      # sudo 없이 되면 성공
 
 ---
 
+## 2-0. VM 이 꺼져 있을 때 — 완전히 처음부터 켜는 절차
+
+SSH 는 **VM 이 켜져 있어야만** 붙습니다. VM 이 꺼진 상태에서
+`ssh -p 2222 ...` 를 하면 `Connection refused` 가 납니다.
+포트 포워딩은 켜진 VM 으로만 연결해 주기 때문입니다.
+
+### 1단계 — VM 켜기 (내 PC 에서)
+
+VirtualBox 창을 열고 해당 VM 을 선택 → **시작(초록 화살표)**.
+
+로그인 화면이 뜨고 30초쯤 지나면 SSH 가 준비됩니다.
+콘솔 창에서 로그인할 필요는 없습니다 — 켜두기만 하면 됩니다.
+
+> 창을 닫을 때 **"머신 전원 끄기"** 를 고르면 VM 이 꺼져 서비스도
+> 함께 내려갑니다. 계속 서비스하려면 창을 그냥 두거나,
+> 아래 헤드리스 모드를 쓰세요.
+
+### 2단계 — SSH 로 접속
+
+```bash
+ssh -p 2222 vboxuser@127.0.0.1
+```
+
+### 창 없이 켜기 (헤드리스)
+
+콘솔 창이 거슬리면 PowerShell 에서 백그라운드로 켤 수 있습니다.
+
+```powershell
+# VM 이름 확인
+& "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" list vms
+
+# 창 없이 켜기 (이름은 위에서 확인한 것으로)
+& "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" startvm "Ubuntu" --type headless
+
+# 정상 종료
+& "C:\Program Files\Oracle\VirtualBox\VBoxManage.exe" controlvm "Ubuntu" acpipowerbutton
+```
+
+매번 치기 번거로우면 `VBoxManage.exe` 가 있는 폴더를 PATH 에 넣으면
+`VBoxManage startvm "Ubuntu" --type headless` 로 짧아집니다.
+
+### VM 을 켜면 무엇이 자동으로 돌아오나
+
+| 항목 | 자동 여부 |
+|------|----------|
+| db / web / nginx 컨테이너 | ✅ `restart: unless-stopped` 로 자동 |
+| GitHub Actions 러너 | ✅ systemd 서비스로 자동 |
+| 밀린 배포(queued) | ✅ 러너가 뜨면 자동으로 가져감 |
+| **Quick Tunnel (외부 주소)** | ⚠️ **profile 밖이라 자동 아님** |
+| 위 터널 복구 | ✅ autoheal 설치 후에는 부팅 90초 뒤 자동 |
+
+`autoheal` 을 설치하기 전이라면 터널만 수동으로 켜야 합니다:
+
+```bash
+./scripts/setup_tunnel.sh --quick
+```
+
+한 번 설치해두면 이 수동 작업이 없어집니다 (§5-1 참고).
+
+---
+
 ## 2-1. VM 에 SSH 로 접속하기 (NAT 환경)
 
 VirtualBox 콘솔 창은 한글이 `◆◆◆` 로 깨지고 복사·붙여넣기가 안 됩니다.
