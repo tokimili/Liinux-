@@ -218,6 +218,50 @@ deploy.yml    VM 내부 self-hosted runner                        [VM]
 것은 다릅니다. `/healthz` 가 `{"status":"ok"}` + DB 연결을 응답할 때만
 배포를 성공으로 인정하고, 아니면 이전 이미지로 되돌립니다.
 
+### 자기복구 (self-healing) — push 가 없어도 유지된다
+
+CI/CD 는 **push 라는 이벤트가 있을 때만** 동작합니다. 그래서 아래 상황은
+파이프라인이 아무리 잘 돌아도 자동으로 낫지 않고, VM 에 직접 접속해서
+손으로 고쳐야 했습니다.
+
+| 상황 | 왜 CI/CD 로 안 고쳐지나 |
+|------|------------------------|
+| VM 재부팅·정전 | 컨테이너는 `restart: unless-stopped` 로 살아나지만 **Quick Tunnel 은 profile 밖**이라 죽은 채 남음 → 외부 접속만 끊김 |
+| 터널이 조용히 끊김 | push 가 없으니 아무 트리거도 없음. 앱은 멀쩡해서 알아채기 어려움 |
+| 배포 실패로 옛 커밋에 머묾 | main 과 실제 서비스가 어긋난 채 방치 (드리프트) |
+| 러너 프로세스 사망 | 배포 자체가 트리거되지 않음 |
+
+`scripts/autoheal.sh` 를 systemd timer 로 돌려 **main 브랜치를 기준으로**
+VM 상태를 계속 맞춥니다.
+
+```bash
+sudo ./scripts/setup_autoheal.sh          # 설치 (기본 1분 주기)
+sudo ./scripts/setup_autoheal.sh --interval 5min
+journalctl -u vmlab-autoheal -f           # 동작 로그
+sudo /usr/local/bin/vmlab-autoheal --dry-run   # 무엇을 할지 미리보기
+```
+
+점검·복구 항목:
+
+```
+1. 보안 게이트   SECURITY_MODE=vulnerable 이면 오히려 터널을 '내린다'
+2. 앱 스택       /healthz 실패 시 db/web/nginx 기동 후 최대 60초 확인
+3. 외부 터널     끊겨 있으면 재기동, 새 주소를 /var/lib/vmlab/tunnel_url 에 기록
+4. 드리프트      main 해시 vs 실행 커밋 비교. 러너가 죽었으면 재시작
+```
+
+설계상 지킨 두 가지:
+
+- **멱등** — 이미 정상이면 아무것도 하지 않습니다. 1분마다 도는 물건이라
+  매번 뭔가를 재기동하면 그 자체가 장애가 됩니다.
+- **빌드는 하지 않는다** — 드리프트를 감지해도 여기서 직접 빌드·배포하지
+  않습니다. 그렇게 하면 CI 의 테스트 게이트를 우회하는 셈입니다. 대신
+  러너를 되살려 GitHub Actions 가 정상 경로로 배포하게 합니다.
+- **한 번도 켠 적 없는 터널은 켜지 않습니다** — 의도하지 않은 외부 노출을
+  만들지 않기 위해, 과거에 존재했던 터널만 되살립니다.
+
+부팅 후 90초 뒤 첫 실행됩니다(도커가 컨테이너를 올릴 시간).
+
 ### 운영 명령
 
 ```bash
@@ -228,7 +272,21 @@ deploy.yml    VM 내부 self-hosted runner                        [VM]
 ./scripts/setup_tunnel.sh --quick
 ./scripts/setup_tunnel.sh --status    # 현재 공개 주소 확인
 ./scripts/setup_tunnel.sh --down      # 외부 노출 차단 (앱은 계속 동작)
+
+# 자기복구
+sudo ./scripts/setup_autoheal.sh              # 설치 (1회)
+systemctl status vmlab-autoheal.timer         # 타이머 상태
+journalctl -u vmlab-autoheal -n 30 --no-pager # 최근 동작
+cat /var/lib/vmlab/tunnel_url                 # 현재 외부 주소
 ```
+
+> ℹ️ **`--down` 과 자기복구는 충돌하지 않습니다.**
+> `--down` 은 터널 컨테이너를 `stop` 이 아니라 `rm -f` 로 **삭제**합니다.
+> autoheal 은 "컨테이너가 존재하는데 멈춰 있는 경우"만 되살리므로,
+> 삭제된 상태는 "사용자가 의도적으로 내렸다"로 보고 건드리지 않습니다.
+> (`stop` 이었다면 1분 뒤 되살아나 실습을 방해했을 것입니다.)
+> 취약 모드에서는 이중으로 안전합니다 — autoheal 이 `vulnerable` 을
+> 감지하면 오히려 터널을 내립니다.
 
 > ⚠️ **compose 를 직접 쓸 때는 반드시 `-p vmlab`** 을 붙이세요.
 > 안 붙이면 디렉터리 이름에서 프로젝트명을 유추해(`liinux-`) 실행 중인

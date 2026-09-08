@@ -520,6 +520,68 @@ A/B 어느 경로든 터널을 켜기 전에 **두 번 확인**합니다:
 
 ---
 
+## 5-1. 자기복구 자동화 (재부팅·터널 끊김 대비)
+
+CI/CD 는 **push 가 있을 때만** 동작합니다. 그래서 아래 상황은 파이프라인이
+정상이어도 자동으로 낫지 않고, VM 에 접속해 손으로 고쳐야 했습니다.
+
+- VM 재부팅 → 컨테이너는 살아나지만 **Quick Tunnel 은 profile 밖**이라
+  죽은 채 남습니다. 앱은 정상인데 외부 주소만 안 열립니다.
+- 터널이 Cloudflare 쪽 사정으로 끊김 → 아무 트리거도 없어 방치됩니다.
+- 배포 실패로 VM 이 옛 커밋에 머묾(드리프트).
+- 러너 프로세스 사망 → 배포 자체가 시작되지 않습니다.
+
+### 설치 (1회)
+
+```bash
+cd ~/Liinux-
+sudo ./scripts/setup_autoheal.sh              # 기본 1분 주기
+sudo ./scripts/setup_autoheal.sh --interval 5min
+```
+
+systemd timer 로 등록됩니다. cron 대신 timer 를 쓰는 이유는 ① 부팅 직후
+실행(`OnBootSec=90s`)을 정확히 표현할 수 있고 ② 로그가 journald 로 모이며
+③ 이전 실행이 안 끝났으면 겹쳐 돌지 않기 때문입니다(1분 주기에서 compose
+명령이 겹치면 충돌합니다).
+
+### 확인
+
+```bash
+systemctl status vmlab-autoheal.timer
+journalctl -u vmlab-autoheal -f
+sudo /usr/local/bin/vmlab-autoheal --dry-run   # 무엇을 할지 미리보기
+cat /var/lib/vmlab/tunnel_url                  # 현재 외부 주소
+```
+
+### 무엇을 하는가
+
+| 순서 | 점검 | 조치 |
+|------|------|------|
+| 1 | `SECURITY_MODE` | `vulnerable` 이면 **터널을 내린다** (노출 차단) |
+| 2 | `/healthz` | 실패 시 db/web/nginx 기동, 최대 60초 대기 |
+| 3 | 실행 중인 `mode` | secure 가 아니면 터널을 내리고 중단 |
+| 4 | 터널 | 멈춰 있으면 재기동, 새 주소를 기록 |
+| 5 | main 해시 vs 실행 커밋 | 드리프트 보고. 러너가 죽었으면 재시작 |
+
+**직접 빌드·배포하지 않습니다.** 그렇게 하면 CI 의 테스트 게이트를
+우회하게 됩니다. 러너만 되살려 GitHub Actions 가 정상 경로로 배포하게 합니다.
+
+### 실습할 때 방해되지 않는가
+
+되지 않습니다. `--down` 은 터널 컨테이너를 `stop` 이 아니라 `rm -f` 로
+**삭제**하고, autoheal 은 "존재하는데 멈춘" 컨테이너만 되살립니다.
+즉 사용자가 의도적으로 내린 터널은 그대로 둡니다.
+`vulnerable` 모드에서는 이중으로, 오히려 노출을 차단합니다.
+
+오래 멈춰두고 싶다면:
+
+```bash
+sudo systemctl stop vmlab-autoheal.timer      # 일시 중지
+sudo ./scripts/setup_autoheal.sh --uninstall  # 완전 제거
+```
+
+---
+
 ## 6. 검증
 
 ### 배포 파이프라인
@@ -775,10 +837,14 @@ sudo ./scripts/setup_runner.sh
 # 4) 외부 공개 — 도메인 없으면 --quick
 ./scripts/setup_tunnel.sh --quick
 
+# 5) 자기복구 — 재부팅/터널끊김을 사람 손 없이 되돌린다
+sudo ./scripts/setup_autoheal.sh
+
 # 확인
-docker compose ps
+sudo docker compose -p vmlab ps       # ★ -p vmlab 필수 (없으면 스택이 안 보인다)
 curl -s localhost:8080/healthz | jq
 ./scripts/setup_tunnel.sh --status    # 공개 주소 확인
+journalctl -u vmlab-autoheal -n 20 --no-pager
 ```
 
 요구사항 #1~#3 은 여기서 다 끝납니다.

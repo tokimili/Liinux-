@@ -10,6 +10,12 @@
 # ==========================================================================
 set -Eeuo pipefail
 
+# ★ 프로젝트 이름을 여기서 못 박는다.
+#   deploy.yml 이 env 로 넣어주지만, 사람이 VM 에서 직접 이 스크립트를
+#   실행하는 경우엔 그 값이 없다. 그러면 compose 가 디렉터리 이름으로
+#   프로젝트를 만들어(liinux-) 실행 중인 스택을 못 보고 충돌을 낸다.
+export COMPOSE_PROJECT_NAME="${COMPOSE_PROJECT_NAME:-vmlab}"
+
 HEALTH_URL="${HEALTH_URL:-http://127.0.0.1:8080/healthz}"
 HEALTH_TIMEOUT="${HEALTH_TIMEOUT:-90}"
 ROLLBACK_TAG="vmlab-web:rollback"
@@ -98,18 +104,35 @@ fi
 #
 # secure 검증 **뒤에** 두는 것이 중요하다. 순서가 바뀌면
 # 취약 빌드가 잠깐이라도 공개될 수 있다.
+#
+# ★ -p vmlab 을 명시하는 이유
+#   compose 는 프로젝트명을 **실행 디렉터리 이름**에서 유추한다.
+#   러너 작업 디렉터리는 `Liinux-` 라서 프로젝트가 `liinux-` 가 되고,
+#   그러면 실행 중인 vmlab 스택이 보이지 않아 컨테이너를 새로 만들려 들다가
+#   `Conflict. container name "/vmlab-db" is already in use` 로 죽는다.
+# ★ --no-deps 를 붙이는 이유
+#   quicktunnel 은 depends_on: nginx 를 갖고 있어서, 그냥 up 하면
+#   방금 배포한 web/nginx 까지 다시 만들려 든다.
+COMPOSE_P="${COMPOSE_PROJECT_NAME:-vmlab}"
+qt_up() {
+    docker compose -p "${COMPOSE_P}" --profile quick up -d --no-deps quicktunnel
+}
+qt_url() {
+    sleep 5
+    docker logs --tail 200 vmlab-quicktunnel 2>&1 \
+        | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true
+}
+
 if docker ps -a --format '{{.Names}}' | grep -qx vmlab-quicktunnel; then
     if docker ps --format '{{.Names}}' | grep -qx vmlab-quicktunnel; then
         log "Quick Tunnel 실행 중 — 유지"
     else
         log "Quick Tunnel 이 중단되어 있어 재기동합니다"
-        docker compose --profile quick up -d quicktunnel 2>/dev/null || \
+        qt_up >/dev/null 2>&1 || \
             fail "Quick Tunnel 재기동 실패 — ./scripts/setup_tunnel.sh --quick 로 다시 켜세요"
     fi
     # 주소는 재기동 시 바뀌므로 배포 로그에 남겨준다.
-    sleep 5
-    NEWURL="$(docker logs vmlab-quicktunnel 2>&1 \
-               | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1 || true)"
+    NEWURL="$(qt_url)"
     [[ -n "${NEWURL}" ]] && log "외부 접속 주소: ${NEWURL}"
 fi
 
