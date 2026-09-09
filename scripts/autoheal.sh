@@ -285,9 +285,29 @@ fi
 #    대신 러너가 죽어 있으면 그건 되살린다 — 러너만 살아나면
 #    GitHub Actions 가 밀린 배포를 알아서 가져간다.
 # ==========================================================================
+#    ★ 실패하면 반드시 말해야 한다
+#      처음엔 조회 실패 시 조용히 건너뛰게 짰는데, 그러면 감지 기능이
+#      죽어 있어도 로그에는 "점검 완료"만 찍혀 정상처럼 보인다.
+#      동작하지 않는 안전장치를 동작한다고 믿는 것이 가장 위험하다.
 REMOTE_SHA=""
-if command -v git >/dev/null 2>&1; then
-    REMOTE_SHA="$(git ls-remote origin refs/heads/main 2>/dev/null | awk '{print substr($1,1,7)}' || true)"
+GIT_ERR=""
+if ! command -v git >/dev/null 2>&1; then
+    GIT_ERR="git 명령이 없습니다"
+else
+    # 러너 작업 디렉터리는 소유자가 달라 git 이 거부할 수 있다(dubious ownership).
+    # 조회만 하므로 safe.directory 를 이 실행에 한해 허용한다.
+    if ! GIT_OUT="$(git -c safe.directory='*' ls-remote origin refs/heads/main 2>&1)"; then
+        GIT_ERR="$(printf '%s' "${GIT_OUT}" | head -1)"
+    else
+        REMOTE_SHA="$(printf '%s' "${GIT_OUT}" | awk 'NR==1{print substr($1,1,7)}')"
+        [[ -n "${REMOTE_SHA}" ]] || GIT_ERR="origin/main 을 찾지 못했습니다"
+    fi
+fi
+
+if [[ -n "${GIT_ERR}" ]]; then
+    warn "드리프트 감지 불가: ${GIT_ERR}"
+    echo  "      (main 과 실행 커밋 비교를 건너뜁니다. 배포 자동화에는 영향 없음)"
+    echo  "      확인:  cd ${WORKDIR} && git ls-remote origin"
 fi
 
 if [[ -n "${REMOTE_SHA}" && -n "${LIVE_COMMIT}" ]]; then

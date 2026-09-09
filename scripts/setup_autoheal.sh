@@ -131,6 +131,13 @@ ${C_G}설치 완료${C_0}
     수동실행 : sudo ${DEST}
     미리보기 : sudo ${DEST} --dry-run
     현재주소 : cat /var/lib/vmlab/tunnel_url
+               (터널을 켠 뒤에 생기는 파일입니다. 켜기 전이면
+                No such file 이 나오는 것이 정상입니다)
+
+  ※ 외부 공개는 최초 1회만 직접 켜세요:
+        ./scripts/setup_tunnel.sh --quick
+    한 번도 켠 적 없는 터널을 자동으로 켜지 않는 것은
+    의도치 않은 외부 노출을 막기 위한 설계입니다.
     제거     : sudo ./scripts/setup_autoheal.sh --uninstall
 
 EOF
