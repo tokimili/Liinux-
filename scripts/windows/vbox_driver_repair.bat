@@ -124,7 +124,7 @@ if errorlevel 1 (
     echo    3^) C:\Windows\System32\drivers 에서
     echo       VBox 로 시작하는 .sys 파일이 남아 있으면 삭제
     echo    4^) VirtualBox 7.2.16 재설치 - 설치 중 나오는
-    echo       "장치 소프트웨어를 설치하시겠습니까?" 에 반드시 [설치]
+    echo       [장치 소프트웨어를 설치하시겠습니까] 창이 뜨면 반드시 [설치]
     echo    5^) 재부팅
     echo    6^) VirtualBox 실행 - 머신 - 추가 -
     echo       D:\Virtualbox\VMS\testVM\testVM.vbox 선택
