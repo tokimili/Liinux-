@@ -46,12 +46,33 @@ bcdedit /set hypervisorlaunchtype off
 echo.
 
 echo ------------------------------------------------------------
-echo  3. Hyper-V 관련 기능 끄기
+echo  3. VBS (가상화 기반 보안) 끄기
+echo     ★ hypervisorlaunchtype off 만으로 안 되는 진짜 원인이 보통 여기.
+echo       VBS 는 별도 경로로 하이퍼바이저를 올립니다.
+echo ------------------------------------------------------------
+bcdedit /set vsmlaunchtype off
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard" /v EnableVirtualizationBasedSecurity /t REG_DWORD /d 0 /f
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard" /v RequirePlatformSecurityFeatures /t REG_DWORD /d 0 /f
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\DeviceGuard\Scenarios\HypervisorEnforcedCodeIntegrity" /v Enabled /t REG_DWORD /d 0 /f
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\Lsa" /v LsaCfgFlags /t REG_DWORD /d 0 /f
+echo.
+
+echo ------------------------------------------------------------
+echo  4. Hyper-V 관련 기능 끄기
 echo     ("기능을 찾을 수 없습니다" 는 원래 꺼져 있다는 뜻 - 무시)
 echo ------------------------------------------------------------
 DISM /Online /Disable-Feature:Microsoft-Hyper-V-All /NoRestart
 DISM /Online /Disable-Feature:HypervisorPlatform /NoRestart
 DISM /Online /Disable-Feature:VirtualMachinePlatform /NoRestart
+DISM /Online /Disable-Feature:Containers-DisposableClientVM /NoRestart
+echo.
+
+echo ------------------------------------------------------------
+echo  5. 적용 결과 확인
+echo ------------------------------------------------------------
+bcdedit | findstr /I "hypervisorlaunchtype vsmlaunchtype"
+echo.
+echo   ^> 둘 다 Off 로 보이면 정상입니다.
 echo.
 
 echo ============================================================
@@ -63,12 +84,20 @@ echo.
 echo    Windows 보안 - 장치 보안 - 코어 격리 세부 정보
 echo      - "메모리 무결성" 을 [끔] 으로
 echo.
+echo    ※ 회색으로 비활성화돼 눌리지 않으면, 위 레지스트리 조치가
+echo       재부팅 후 대신 적용됩니다.
+echo.
 echo  [그다음 반드시 재부팅]
 echo.
 echo    재부팅해야 적용됩니다.
 echo    재부팅 후 VirtualBox 에서 VM 을 다시 시작하세요.
 echo.
+echo  [그래도 안 되면]
+echo    diag_virtualbox.bat 를 관리자 권한으로 실행해서
+echo    결과를 그대로 보내주세요. 무엇이 남았는지 알 수 있습니다.
+echo.
 echo  [참고] WSL2 / Docker Desktop 을 쓰신다면 그것들이 Hyper-V 를
 echo         다시 켭니다. VirtualBox 와 동시 사용은 어렵습니다.
+echo         WSL 은 1 로 낮추면 공존 가능:  wsl --set-default-version 1
 echo.
 pause
