@@ -2,13 +2,32 @@
  VirtualBox 재설치 절차  (VBoxDrv 커널 드라이버 누락 해결)
 ==========================================================================
 
- [원인 확정]
+ ┌──────────────────────────────────────────────────────────────────────┐
+ │ ★ 정정 — 재설치 전에 반드시 읽으세요                                 │
+ │                                                                      │
+ │ VirtualBox 7.x 는 핵심 드라이버 이름이 바뀌었습니다.                 │
+ │     구(6.x):  VBoxDrv.sys  / 서비스 VBoxDrv                          │
+ │     신(7.x):  VBoxSup.sys  / 서비스 VBoxSup                          │
+ │                                                                      │
+ │ 따라서 7.2.16 에서 VBoxDrv 가 없는 것은 "정상"입니다.                │
+ │ 앞서 sc query VBoxDrv 결과만으로 드라이버 미설치라고 판단한 것은     │
+ │ 잘못이었습니다.                                                      │
+ │                                                                      │
+ │ 먼저 vbox_sup_check.bat 로 VBoxSup 상태를 확인하세요.                │
+ │ VBoxSup 이 RUNNING 이면 재설치가 필요 없습니다.                      │
+ │                                                                      │
+ │ ※ C:\Windows\System32\drivers 의 VBox*.sys 를 지금 지우지 마세요.    │
+ │   VBoxSup.sys 는 현재 설치의 핵심 파일입니다. 삭제는 "제거를         │
+ │   끝낸 뒤에도 남아 있을 때" 만 하는 청소 작업입니다.                 │
+ └──────────────────────────────────────────────────────────────────────┘
+
+ [증상]
    StartService: OpenService FAILED 1060
    1060 = ERROR_SERVICE_DOES_NOT_EXIST  (서비스가 존재하지 않음)
 
-   VirtualBox 는 VBoxDrv 라는 커널 드라이버 위에서만 동작합니다.
-   이 드라이버가 등록되지 않아 VM 프로세스가 뜨기도 전에 죽었고,
-   그래서 VBox.log 조차 새로 만들어지지 않았습니다.
+   단, 이 메시지는 VBoxDrv 를 조회했을 때 나온 것이므로
+   7.x 에서는 그 자체로 이상이 아닐 수 있습니다.
+   VBoxSup 까지 없거나 시작되지 않을 때만 아래 재설치를 진행하세요.
 
  [중요] VM 파일은 지워지지 않습니다.
         D:\Virtualbox\VMS\testVM 폴더와 그 안의 가상 디스크
@@ -42,7 +61,13 @@
       C:\Windows\System32\drivers
 
   검색창에 VBox 를 입력해서 나오는 .sys 파일이 있으면 전부 삭제.
-  (VBoxDrv.sys, VBoxNetAdp6.sys, VBoxNetLwf.sys, VBoxUSBMon.sys 등)
+  (VBoxSup.sys, VBoxNetAdp6.sys, VBoxNetLwf.sys, VBoxUSBMon.sys 등)
+
+  ★★ 순서를 지키세요 ★★
+     이 삭제는 "1단계 제거 + 2단계 재부팅을 끝낸 뒤" 하는 청소입니다.
+     제거하지 않은 상태에서 지우면 멀쩡한 설치를 망가뜨려
+     반드시 재설치해야 하는 상태가 됩니다.
+     특히 VBoxSup.sys 는 VirtualBox 7.x 의 핵심 드라이버입니다.
 
   ※ 없으면 그냥 넘어가세요. 정상입니다.
   ※ "권한이 필요합니다" 가 뜨면 [계속] 을 누르세요.
