@@ -85,7 +85,7 @@ echo  [C] 외부 노출면 점검  ^<-- VM 프로젝트와 직접 관련
 echo ------------------------------------------------------------
 echo.
 echo   -- 외부에서 접근 가능한 리스닝 포트 (0.0.0.0 바인딩) --
-netstat -ano ^| findstr /R "LISTENING" | findstr "0.0.0.0:" | findstr /V "127.0.0.1"
+netstat -ano | findstr "LISTENING" | findstr "0.0.0.0:"
 echo.
 echo   ^> 여기에 8080 이 보이면 안 됩니다.
 echo     이 프로젝트는 nginx 를 127.0.0.1:8080 에만 묶었고,
