@@ -76,7 +76,7 @@ class Config:
     # 실제 AI 호출은 별도의 ai-proxy 컨테이너(app/ai_proxy_server.py)가
     # 전담한다. web 은 그 프록시를 부를 때 쓰는 공유 비밀만 안다.
     CANVAS_AI_PROXY_TOKEN = os.environ.get("CANVAS_AI_PROXY_TOKEN", "")
-    CANVAS_AI_TIMEOUT_SEC = _int("CANVAS_AI_TIMEOUT_SEC", 30)
+    CANVAS_AI_TIMEOUT_SEC = _int("CANVAS_AI_TIMEOUT_SEC", 45)
 
     @property
     def is_vulnerable_mode(self) -> bool:

@@ -33,7 +33,7 @@ INTERNAL_TOKEN = os.environ.get("CANVAS_AI_PROXY_TOKEN", "")
 PROVIDER = os.environ.get("CANVAS_AI_PROVIDER", "").strip().lower()
 MODEL_OVERRIDE = os.environ.get("CANVAS_AI_MODEL", "").strip()
 API_KEY = os.environ.get("CANVAS_AI_API_KEY", "")
-TIMEOUT_SEC = int(os.environ.get("CANVAS_AI_TIMEOUT_SEC") or 30)
+TIMEOUT_SEC = int(os.environ.get("CANVAS_AI_TIMEOUT_SEC") or 45)
 
 MAX_OUTPUT_TOKENS = 4096
 DEFAULT_PROMPT = (
