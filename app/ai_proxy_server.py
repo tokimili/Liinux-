@@ -13,8 +13,11 @@ CSRF 등 메인 앱의 기반이 전혀 필요 없고, 오히려 그것들이 �
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
+import urllib.error
+import urllib.request
 
 import anthropic
 import openai
@@ -38,10 +41,15 @@ DEFAULT_PROMPT = (
     "마크다운으로 작성해줘. 구성 요소별 위치·비율·스타일·색상을 구체적으로 적어줘."
 )
 
-# 비전 지원 모델 중 제공사별로 가장 저렴한 기본값.
+# 비전 지원 모델 중 제공사별로 가장 저렴한(또는 무료) 기본값.
+# gemini: Google AI Studio 에서 신용카드 없이 무료 API 키 발급 가능
+#   (https://aistudio.google.com/apikey). 모델명이 자주 바뀌므로, 기본값이
+#   404 등으로 실패하면 CANVAS_AI_MODEL 에 최신 모델명을 직접 지정할 것
+#   (https://ai.google.dev/gemini-api/docs/models 에서 확인).
 _DEFAULT_MODELS = {
     "anthropic": "claude-haiku-4-5",
     "openai": "gpt-4o-mini",
+    "gemini": "gemini-2.0-flash",
 }
 
 
@@ -89,6 +97,27 @@ def _call_openai(image_data_url: str, prompt: str, model: str) -> str:
     return response.choices[0].message.content or ""
 
 
+def _call_gemini(media_type: str, b64data: str, prompt: str, model: str) -> str:
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+        f"?key={API_KEY}"
+    )
+    payload = json.dumps({
+        "contents": [{
+            "parts": [
+                {"inline_data": {"mime_type": media_type, "data": b64data}},
+                {"text": prompt},
+            ],
+        }],
+    }).encode("utf-8")
+    req = urllib.request.Request(  # noqa: S310  # nosec: B310 -- 고정된 Google API 호스트, 사용자 입력 아님
+        url, data=payload, method="POST", headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(req, timeout=TIMEOUT_SEC) as resp:  # noqa: S310  # nosec: B310
+        body = json.loads(resp.read().decode("utf-8"))
+    return body["candidates"][0]["content"]["parts"][0]["text"]
+
+
 @app.get("/healthz")
 def healthz():
     return jsonify(status="ok", provider=PROVIDER or None)
@@ -103,7 +132,7 @@ def generate():
     if not constant_time_compare(sent_token, INTERNAL_TOKEN):
         return jsonify(error="unauthorized"), 403
 
-    if PROVIDER not in ("anthropic", "openai"):
+    if PROVIDER not in ("anthropic", "openai", "gemini"):
         return jsonify(error="AI 제공사가 서버에 설정되지 않았습니다 (.env 의 CANVAS_AI_PROVIDER)."), 503
     if not API_KEY:
         return jsonify(error="AI API 키가 서버에 설정되지 않았습니다 (.env 의 CANVAS_AI_API_KEY)."), 503
@@ -122,10 +151,15 @@ def generate():
     try:
         if PROVIDER == "anthropic":
             markdown = _call_anthropic(media_type, b64data, prompt, model)
-        else:
+        elif PROVIDER == "openai":
             markdown = _call_openai(image, prompt, model)
+        else:
+            markdown = _call_gemini(media_type, b64data, prompt, model)
     except (anthropic.APIError, openai.APIError) as e:
-        log.warning("Canvas AI API 호출 실패: provider=%s %s", PROVIDER, type(e).__name__)
+        log.warning("Canvas AI API 호출 실패: provider=%s %s: %s", PROVIDER, type(e).__name__, e)
+        return jsonify(error="AI API 호출에 실패했습니다. 잠시 후 다시 시도하세요."), 502
+    except (urllib.error.HTTPError, urllib.error.URLError, KeyError, json.JSONDecodeError) as e:
+        log.warning("Canvas AI API 호출 실패: provider=%s %s: %s", PROVIDER, type(e).__name__, e)
         return jsonify(error="AI API 호출에 실패했습니다. 잠시 후 다시 시도하세요."), 502
 
     return jsonify(markdown=markdown)
