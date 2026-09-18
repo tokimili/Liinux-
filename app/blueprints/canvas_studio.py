@@ -90,7 +90,7 @@ def generate():
     )
 
     try:
-        with urllib.request.urlopen(req, timeout=cfg.CANVAS_AI_TIMEOUT_SEC) as resp:  # noqa: S310 — 스킴은 위에서 http(s) 로 검증됨
+        with urllib.request.urlopen(req, timeout=cfg.CANVAS_AI_TIMEOUT_SEC) as resp:  # noqa: S310  # nosec: B310 -- 스킴은 위에서 http(s) 로 검증됨
             body = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         log.warning("Canvas AI API 오류 응답: status=%s user=%s", e.code, session.get("username"))
