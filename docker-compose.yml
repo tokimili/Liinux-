@@ -115,6 +115,36 @@ services:
       - /tmp:size=64m,mode=1777
     logging: *default_logging
 
+  # ------------------------------------------------------------------ AI 프록시
+  # Canvas AI Studio 전용 인터넷 출구.
+  # web 은 backend(internal) 네트워크에만 있어 인터넷에 못 나간다 —
+  # 이 서비스만 frontend+backend 양쪽에 붙어 실제 Claude/OpenAI 호출을
+  # 대신한다. 이미지는 web 과 동일한 것을 재사용한다(별도 빌드 불필요).
+  ai-proxy:
+    image: vmlab-web:${APP_VERSION:-dev}
+    container_name: vmlab-ai-proxy
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      GUNICORN_BIND: 0.0.0.0:8100
+    command: ["gunicorn", "--config", "deploy/gunicorn.conf.py", "app.ai_proxy_server:app"]
+    networks:
+      - frontend
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8100/healthz"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    logging: *default_logging
+
   # ------------------------------------------------------------------ Nginx
   nginx:
     image: nginx:1.27-alpine

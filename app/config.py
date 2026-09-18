@@ -71,13 +71,11 @@ class Config:
     DEPLOYED_AT = os.environ.get("DEPLOYED_AT", "")
 
     # ---- Canvas AI Studio ----
-    # 클라이언트는 제공사/키를 알 수 없다 — 서버가 자신의 키로만 호출한다.
-    # (브라우저에 키가 노출되면 누구나 이 키로 과금을 유발할 수 있다)
-    # PROVIDER: "anthropic" | "openai" — 코드 수정 없이 .env 로 전환한다.
-    # MODEL 을 비워두면 제공사별 최저가 비전 모델을 기본값으로 쓴다.
-    CANVAS_AI_PROVIDER = os.environ.get("CANVAS_AI_PROVIDER", "").strip().lower()
-    CANVAS_AI_MODEL = os.environ.get("CANVAS_AI_MODEL", "").strip()
-    CANVAS_AI_API_KEY = os.environ.get("CANVAS_AI_API_KEY", "")
+    # 실제 AI 제공사/모델/키는 이 컨테이너(web)에 없다 — web 은 backend
+    # (internal) 네트워크에만 있어 인터넷에 못 나가므로, 인터넷이 필요한
+    # 실제 AI 호출은 별도의 ai-proxy 컨테이너(app/ai_proxy_server.py)가
+    # 전담한다. web 은 그 프록시를 부를 때 쓰는 공유 비밀만 안다.
+    CANVAS_AI_PROXY_TOKEN = os.environ.get("CANVAS_AI_PROXY_TOKEN", "")
     CANVAS_AI_TIMEOUT_SEC = _int("CANVAS_AI_TIMEOUT_SEC", 30)
 
     @property

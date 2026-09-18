@@ -61,8 +61,9 @@ scrypt 해싱 · 타이밍공격 대비 더미해시 · 브루트포스 잠금(I
 
 ### Canvas AI Studio (`/studio`, 로그인 필요)
 Fabric.js 캔버스에 구도를 그리면, 비전 AI가 분석해서 그림 생성 AI가 바로 실행할 수 있는 마크다운 작업 지시서를 만들어준다.
-- **키는 브라우저에 없다**: `/studio/generate` 서버 라우트가 `.env`의 `CANVAS_AI_PROVIDER`(anthropic/openai)와 `CANVAS_AI_API_KEY`로만 Claude/OpenAI 공식 SDK를 호출한다. 클라이언트는 캔버스 이미지·JSON·프롬프트만 보낸다.
-- 제공사는 코드 수정 없이 `.env`만 바꿔 전환한다. 모델도 비워두면 제공사별 최저가 비전 모델(`claude-haiku-4-5` / `gpt-4o-mini`)을 자동으로 쓴다 — 토큰 비용 절감이 목적이라 기본값을 가장 싼 쪽으로 잡았다.
+- **`web` 컨테이너는 이 기능 때문에 인터넷에 열리지 않는다**: `web`은 원래부터 `backend`(internal) 네트워크에만 있어 인터넷에 못 나간다(DB 유출 방지). 실제 Claude/OpenAI 호출은 `frontend`+`backend` 양쪽에 연결된 별도 **`ai-proxy`** 컨테이너(`app/ai_proxy_server.py`)가 전담하고, `web`은 공유 비밀(`CANVAS_AI_PROXY_TOKEN`)로 내부망 너머 이 프록시만 호출한다. `web`이 침해당해도 AI 키·제공사 설정은 노출되지 않는다.
+- `ai-proxy`는 `web`과 이미지를 공유한다(별도 빌드 없음) — `docker-compose.yml`에서 `command:`만 바꿔 다른 진입점(`app.ai_proxy_server:app`)으로 띄운다.
+- 제공사는 코드 수정 없이 `.env`의 `CANVAS_AI_PROVIDER`(anthropic/openai)만 바꿔 전환한다. 모델도 비워두면 제공사별 최저가 비전 모델(`claude-haiku-4-5` / `gpt-4o-mini`)을 자동으로 쓴다 — 토큰 비용 절감이 목적이라 기본값을 가장 싼 쪽으로 잡았다.
 - `/api/*`와 달리 CSRF 검사를 받는다 — 이 라우트는 외부 API 과금을 유발하는 상태 변경 요청이기 때문에 읽기전용 API의 CSRF 예외에서 의도적으로 제외했다.
 - Fabric.js는 CDN이 아니라 `app/static/js/vendor/`에 직접 내장한다 — 브라우저의 추적 방지/쿠키 차단 설정에 영향받지 않고, 사이트 전체의 "외부 의존 최소화" CSP 원칙과도 일치한다.
 
