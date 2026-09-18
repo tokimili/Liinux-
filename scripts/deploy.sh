@@ -27,12 +27,17 @@ fail() { printf '[deploy][ERROR] %s\n' "$*" >&2; }
 # 현재 돌고 있는 이미지를 태그로 고정해둔다.
 # compose 가 새 이미지를 같은 이름으로 덮어쓰기 때문에, ID 만으로는
 # prune 후 사라질 수 있다.
+#
+# ID 를 얻었다고 해서 그 이미지가 실제로 로컬에 남아있다는 보장은 없다
+# (레이스 컨디션·정리 타이밍에 따라 조회 시점과 tag 시점 사이에 사라질 수
+# 있다) — inspect 로 실존을 확인한 뒤에만 tag 한다. 여기서 실패하면 안 되는
+# 이유: 롤백 지점을 못 만드는 것과 배포 자체가 죽는 것은 다른 문제다.
 PREV_IMAGE="$(docker compose images -q web 2>/dev/null | head -1 || true)"
-if [[ -n "${PREV_IMAGE}" ]]; then
+if [[ -n "${PREV_IMAGE}" ]] && docker image inspect "${PREV_IMAGE}" >/dev/null 2>&1; then
     docker tag "${PREV_IMAGE}" "${ROLLBACK_TAG}"
     log "롤백 지점 저장: ${PREV_IMAGE:0:12} → ${ROLLBACK_TAG}"
 else
-    log "이전 배포 없음 (최초 배포) — 롤백 불가, 실패 시 수동 확인 필요"
+    log "이전 이미지를 사용할 수 없습니다 (최초 배포이거나 이미지가 이미 정리됨) — 롤백 불가, 실패 시 수동 확인 필요"
 fi
 
 # ---------------------------------------------------------------- 교체
