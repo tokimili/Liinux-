@@ -36,8 +36,10 @@ else
 fi
 
 # ---------------------------------------------------------------- 교체
+# ai-proxy 는 web 과 이미지를 공유한다(빌드는 web 몫) — 같이 재생성해야
+# 새 배포의 app/ai_proxy_server.py 변경사항도 함께 반영된다.
 log "컨테이너 교체 시작"
-docker compose up -d --no-deps --force-recreate web nginx
+docker compose up -d --no-deps --force-recreate web nginx ai-proxy
 
 # ---------------------------------------------------------------- 헬스체크 게이트
 log "헬스체크 대기 (최대 ${HEALTH_TIMEOUT}초): ${HEALTH_URL}"
@@ -71,7 +73,9 @@ if [[ "${healthy}" -ne 1 ]]; then
         # compose 가 참조하는 이미지 이름으로 되돌린 뒤 재기동한다
         IMAGE_NAME="$(docker compose config --images web | head -1)"
         docker tag "${ROLLBACK_TAG}" "${IMAGE_NAME}"
-        docker compose up -d --no-deps --force-recreate web nginx
+        # ai-proxy 는 web 과 이미지를 공유하므로 같이 되돌린다
+        docker tag "${ROLLBACK_TAG}" "$(docker compose config --images ai-proxy | head -1)"
+        docker compose up -d --no-deps --force-recreate web nginx ai-proxy
 
         for ((i = 1; i <= 60; i++)); do
             if curl -fsS --max-time 3 "${HEALTH_URL}" >/dev/null 2>&1; then
