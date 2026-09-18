@@ -28,6 +28,9 @@
       <a href="{{ url_for('main.index') }}">홈</a>
       <a href="{{ url_for('board.list_posts') }}">게시판</a>
       <a href="{{ url_for('main.about') }}">아키텍처</a>
+      {% if current_user %}
+        <a href="{{ url_for('canvas_studio.studio') }}">캔버스 스튜디오</a>
+      {% endif %}
       {% if current_user and current_user.role == 'admin' %}
         <a href="{{ url_for('admin.dashboard') }}" class="nav-admin">대시보드</a>
       {% endif %}

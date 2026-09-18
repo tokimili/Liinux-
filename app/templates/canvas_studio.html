@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Canvas AI Studio{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/canvas-studio.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <h1>Canvas AI Studio</h1>
+  <p class="muted">도형·텍스트·이미지를 배치한 뒤 AI로 마크다운 레이아웃을 생성합니다.</p>
+</div>
+
+<div id="studio-shell" data-generate-url="{{ url_for('canvas_studio.generate') }}" data-csrf="{{ csrf_token() }}">
+
+  <div class="studio-toolbar" role="toolbar" aria-label="그리기 도구">
+    <button type="button" class="tool-btn is-active" data-tool="select" title="선택 (V)">↖</button>
+    <button type="button" class="tool-btn" data-tool="rect" title="사각형 (R)">▭</button>
+    <button type="button" class="tool-btn" data-tool="circle" title="원 (C)">◯</button>
+    <button type="button" class="tool-btn" data-tool="triangle" title="삼각형">△</button>
+    <button type="button" class="tool-btn" data-tool="line" title="선 (L)">╱</button>
+    <button type="button" class="tool-btn" data-tool="text" title="텍스트 (T)">T</button>
+    <button type="button" class="tool-btn" data-tool="draw" title="펜 (P)">✎</button>
+    <div class="tool-sep"></div>
+    <button type="button" class="tool-btn" data-action="image" title="이미지 업로드">🖼</button>
+    <input type="file" id="image-input" accept="image/*" hidden>
+    <div class="tool-sep"></div>
+    <button type="button" class="tool-btn" data-action="undo" title="실행 취소 (Ctrl+Z)">↺</button>
+    <button type="button" class="tool-btn" data-action="redo" title="다시 실행 (Ctrl+Y)">↻</button>
+    <div class="tool-sep"></div>
+    <button type="button" class="tool-btn tool-btn-danger" data-action="delete" title="선택 삭제 (Del)">🗑</button>
+    <button type="button" class="tool-btn tool-btn-danger" data-action="clear" title="전체 지우기">⨯</button>
+  </div>
+
+  <div class="studio-canvas-area">
+    <div class="canvas-top-bar">
+      <label class="ctrl-field">
+        채우기
+        <input type="color" id="fill-color" value="#4A7FE4">
+      </label>
+      <label class="ctrl-field">
+        선
+        <input type="color" id="stroke-color" value="#1A1C2E">
+      </label>
+      <label class="ctrl-field">
+        두께
+        <input type="range" id="stroke-width" min="0" max="20" value="2">
+      </label>
+      <label class="ctrl-field">
+        폰트크기
+        <input type="number" id="font-size" min="8" max="120" value="24">
+      </label>
+      <label class="ctrl-field">
+        불투명도
+        <input type="range" id="opacity-slider" min="0" max="100" value="100">
+      </label>
+      <span class="ctrl-count" id="object-count">0개 오브젝트</span>
+    </div>
+
+    <div class="canvas-scroll">
+      <canvas id="main-canvas"></canvas>
+    </div>
+  </div>
+
+  <aside class="studio-right-panel">
+    <section class="panel">
+      <p class="panel-title">AI 변환</p>
+      <div class="field">
+        <label for="api-prompt">프롬프트</label>
+        <textarea id="api-prompt" rows="3">이 레이아웃을 마크다운 블로그 포스트 형식으로 변환해주세요.</textarea>
+      </div>
+      <button type="button" id="send-btn" class="btn btn-primary btn-block">AI에게 전송</button>
+      <p class="hint">API 키는 서버에만 저장되어 있으며 브라우저로 전송되지 않습니다.</p>
+    </section>
+
+    <section class="panel output-section">
+      <div class="output-header">
+        <span class="panel-title">마크다운 출력</span>
+        <div>
+          <button type="button" class="btn btn-ghost btn-xs" id="copy-btn">복사</button>
+          <button type="button" class="btn btn-ghost btn-xs" id="download-btn">다운로드</button>
+        </div>
+      </div>
+      <pre id="md-output" contenteditable="true" data-placeholder="AI가 생성한 마크다운이 여기에 표시됩니다..."></pre>
+    </section>
+  </aside>
+
+  <div class="studio-status-bar" id="status-bar" role="status">준비됨</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/fabric@5.3.1/dist/fabric.min.js"></script>
+<script src="{{ url_for('static', filename='js/canvas-studio.js') }}"></script>
+{% endblock %}
