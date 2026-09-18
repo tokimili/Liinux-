@@ -4,27 +4,12 @@ Canvas AI Studio 라우트 테스트.
 핵심 계약:
   - 비로그인 사용자는 페이지도, 생성 엔드포인트도 쓸 수 없다 (AI 비용 유발 방지).
   - /studio/generate 는 /api/* 가 아니므로 CSRF 검사를 통과해야 한다.
-  - 서버에 AI API가 설정되지 않으면 503으로 명확히 거부한다 (브라우저에 키를 묻지 않는다).
+  - 서버에 AI 제공사/키가 설정되지 않으면 503으로 명확히 거부한다 (브라우저에 묻지 않는다).
+  - provider 에 따라 올바른 SDK(anthropic/openai)로 위임한다.
 """
 from __future__ import annotations
 
-import json
-
 from app.blueprints import canvas_studio
-
-
-class _FakeResponse:
-    def __init__(self, body: dict):
-        self._body = json.dumps(body).encode("utf-8")
-
-    def read(self):
-        return self._body
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
 
 
 def _login_and_get_csrf(client, login, user_factory, form_path="/studio"):
@@ -68,7 +53,7 @@ def test_generate_without_ai_config_returns_503(client, login, user_factory):
 
 
 def test_generate_rejects_missing_image(client, login, user_factory, app):
-    app.config_obj.CANVAS_AI_API_URL = "https://ai.example.invalid/generate"
+    app.config_obj.CANVAS_AI_PROVIDER = "anthropic"
     app.config_obj.CANVAS_AI_API_KEY = "test-key"
     try:
         token = _login_and_get_csrf(client, login, user_factory)
@@ -79,23 +64,33 @@ def test_generate_rejects_missing_image(client, login, user_factory, app):
         )
         assert res.status_code == 400
     finally:
-        app.config_obj.CANVAS_AI_API_URL = ""
+        app.config_obj.CANVAS_AI_PROVIDER = ""
         app.config_obj.CANVAS_AI_API_KEY = ""
 
 
-def test_generate_success_forwards_to_configured_endpoint(client, login, user_factory, app, monkeypatch):
-    app.config_obj.CANVAS_AI_API_URL = "https://ai.example.invalid/generate"
+def test_generate_success_anthropic(client, login, user_factory, app, monkeypatch):
+    app.config_obj.CANVAS_AI_PROVIDER = "anthropic"
     app.config_obj.CANVAS_AI_API_KEY = "test-key"
-
     captured = {}
 
-    def _fake_urlopen(req, timeout=None):
-        captured["url"] = req.full_url
-        captured["auth"] = req.headers.get("Authorization")
-        captured["body"] = json.loads(req.data.decode("utf-8"))
-        return _FakeResponse({"markdown": "# 제목\n\n본문"})
+    class _FakeBlock:
+        type = "text"
+        text = "# 제목\n\n본문"
 
-    monkeypatch.setattr(canvas_studio.urllib.request, "urlopen", _fake_urlopen)
+    class _FakeResponse:
+        content = [_FakeBlock()]
+
+    class _FakeMessages:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return _FakeResponse()
+
+    class _FakeClient:
+        def __init__(self, api_key=None, timeout=None):
+            captured["api_key"] = api_key
+            self.messages = _FakeMessages()
+
+    monkeypatch.setattr(canvas_studio.anthropic, "Anthropic", _FakeClient)
 
     try:
         token = _login_and_get_csrf(client, login, user_factory)
@@ -106,9 +101,89 @@ def test_generate_success_forwards_to_configured_endpoint(client, login, user_fa
         )
         assert res.status_code == 200
         assert res.get_json()["markdown"] == "# 제목\n\n본문"
-        assert captured["url"] == "https://ai.example.invalid/generate"
-        assert captured["auth"] == "Bearer test-key"
-        assert captured["body"]["prompt"] == "요약해줘"
+        assert captured["api_key"] == "test-key"
+        assert captured["model"] == "claude-haiku-4-5"
+        image_block, text_block = captured["messages"][0]["content"]
+        assert image_block["source"]["media_type"] == "image/png"
+        assert image_block["source"]["data"] == "abc"
+        assert text_block["text"] == "요약해줘"
     finally:
-        app.config_obj.CANVAS_AI_API_URL = ""
+        app.config_obj.CANVAS_AI_PROVIDER = ""
+        app.config_obj.CANVAS_AI_API_KEY = ""
+
+
+def test_generate_success_openai(client, login, user_factory, app, monkeypatch):
+    app.config_obj.CANVAS_AI_PROVIDER = "openai"
+    app.config_obj.CANVAS_AI_API_KEY = "test-key"
+    app.config_obj.CANVAS_AI_MODEL = "gpt-4o-mini-test"
+    captured = {}
+
+    class _FakeMessage:
+        content = "# 제목\n\n본문"
+
+    class _FakeChoice:
+        message = _FakeMessage()
+
+    class _FakeResponse:
+        choices = [_FakeChoice()]
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return _FakeResponse()
+
+    class _FakeChat:
+        def __init__(self):
+            self.completions = _FakeCompletions()
+
+    class _FakeClient:
+        def __init__(self, api_key=None, timeout=None):
+            captured["api_key"] = api_key
+            self.chat = _FakeChat()
+
+    monkeypatch.setattr(canvas_studio.openai, "OpenAI", _FakeClient)
+
+    try:
+        token = _login_and_get_csrf(client, login, user_factory)
+        res = client.post(
+            "/studio/generate",
+            json={"image": "data:image/png;base64,abc", "prompt": "요약해줘"},
+            headers={"X-CSRF-Token": token},
+        )
+        assert res.status_code == 200
+        assert res.get_json()["markdown"] == "# 제목\n\n본문"
+        assert captured["model"] == "gpt-4o-mini-test"
+        text_part, image_part = captured["messages"][0]["content"]
+        assert text_part["text"] == "요약해줘"
+        assert image_part["image_url"]["url"] == "data:image/png;base64,abc"
+    finally:
+        app.config_obj.CANVAS_AI_PROVIDER = ""
+        app.config_obj.CANVAS_AI_API_KEY = ""
+        app.config_obj.CANVAS_AI_MODEL = ""
+
+
+def test_generate_upstream_error_returns_502(client, login, user_factory, app, monkeypatch):
+    app.config_obj.CANVAS_AI_PROVIDER = "anthropic"
+    app.config_obj.CANVAS_AI_API_KEY = "test-key"
+
+    class _FakeMessages:
+        def create(self, **kwargs):
+            raise canvas_studio.anthropic.APIConnectionError(request=None)
+
+    class _FakeClient:
+        def __init__(self, api_key=None, timeout=None):
+            self.messages = _FakeMessages()
+
+    monkeypatch.setattr(canvas_studio.anthropic, "Anthropic", _FakeClient)
+
+    try:
+        token = _login_and_get_csrf(client, login, user_factory)
+        res = client.post(
+            "/studio/generate",
+            json={"image": "data:image/png;base64,abc", "prompt": "test"},
+            headers={"X-CSRF-Token": token},
+        )
+        assert res.status_code == 502
+    finally:
+        app.config_obj.CANVAS_AI_PROVIDER = ""
         app.config_obj.CANVAS_AI_API_KEY = ""

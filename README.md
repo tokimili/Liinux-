@@ -60,10 +60,11 @@ scrypt 해싱 · 타이밍공격 대비 더미해시 · 브루트포스 잠금(I
 · 오픈리다이렉트 차단 · 계정열거 방지 · 스택트레이스 미노출(OWASP A10)
 
 ### Canvas AI Studio (`/studio`, 로그인 필요)
-Fabric.js 캔버스에 도형·텍스트·이미지를 배치하고 AI로 마크다운 레이아웃을 생성.
-- **키는 브라우저에 없다**: `/studio/generate` 서버 라우트가 `.env`의 `CANVAS_AI_API_URL`/`CANVAS_AI_API_KEY`로만 외부 AI API를 호출한다. 클라이언트는 캔버스 이미지·JSON·프롬프트만 보낸다.
+Fabric.js 캔버스에 구도를 그리면, 비전 AI가 분석해서 그림 생성 AI가 바로 실행할 수 있는 마크다운 작업 지시서를 만들어준다.
+- **키는 브라우저에 없다**: `/studio/generate` 서버 라우트가 `.env`의 `CANVAS_AI_PROVIDER`(anthropic/openai)와 `CANVAS_AI_API_KEY`로만 Claude/OpenAI 공식 SDK를 호출한다. 클라이언트는 캔버스 이미지·JSON·프롬프트만 보낸다.
+- 제공사는 코드 수정 없이 `.env`만 바꿔 전환한다. 모델도 비워두면 제공사별 최저가 비전 모델(`claude-haiku-4-5` / `gpt-4o-mini`)을 자동으로 쓴다 — 토큰 비용 절감이 목적이라 기본값을 가장 싼 쪽으로 잡았다.
 - `/api/*`와 달리 CSRF 검사를 받는다 — 이 라우트는 외부 API 과금을 유발하는 상태 변경 요청이기 때문에 읽기전용 API의 CSRF 예외에서 의도적으로 제외했다.
-- Fabric.js는 이미 CSP에 허용된 `cdn.jsdelivr.net`에서 로드하고, 폰트는 시스템 폰트 스택을 그대로 쓴다 — 이 페이지 하나 때문에 사이트 전체의 CSP를 느슨하게 만들지 않는다.
+- Fabric.js는 CDN이 아니라 `app/static/js/vendor/`에 직접 내장한다 — 브라우저의 추적 방지/쿠키 차단 설정에 영향받지 않고, 사이트 전체의 "외부 의존 최소화" CSP 원칙과도 일치한다.
 
 ### 의도적 취약점 (vulnerable 모드)
 | ID | 취약점 | 위치 |

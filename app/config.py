@@ -71,9 +71,12 @@ class Config:
     DEPLOYED_AT = os.environ.get("DEPLOYED_AT", "")
 
     # ---- Canvas AI Studio ----
-    # 클라이언트는 URL/토큰을 알 수 없다 — 서버가 자신의 키로만 호출한다.
-    # (브라우저에 토큰이 노출되면 누구나 이 키로 과금을 유발할 수 있다)
-    CANVAS_AI_API_URL = os.environ.get("CANVAS_AI_API_URL", "")
+    # 클라이언트는 제공사/키를 알 수 없다 — 서버가 자신의 키로만 호출한다.
+    # (브라우저에 키가 노출되면 누구나 이 키로 과금을 유발할 수 있다)
+    # PROVIDER: "anthropic" | "openai" — 코드 수정 없이 .env 로 전환한다.
+    # MODEL 을 비워두면 제공사별 최저가 비전 모델을 기본값으로 쓴다.
+    CANVAS_AI_PROVIDER = os.environ.get("CANVAS_AI_PROVIDER", "").strip().lower()
+    CANVAS_AI_MODEL = os.environ.get("CANVAS_AI_MODEL", "").strip()
     CANVAS_AI_API_KEY = os.environ.get("CANVAS_AI_API_KEY", "")
     CANVAS_AI_TIMEOUT_SEC = _int("CANVAS_AI_TIMEOUT_SEC", 30)
 

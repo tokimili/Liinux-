@@ -15,3 +15,7 @@ cryptography==50.0.0
 
 # ===== 유틸 =====
 python-dotenv==1.2.2
+
+# ===== Canvas AI Studio (비전 AI 호출) =====
+anthropic==1.6.0
+openai==3.15.0
