@@ -160,7 +160,7 @@ def generate():
     except (anthropic.APIError, openai.APIError) as e:
         log.warning("Canvas AI API 호출 실패: provider=%s %s: %s", PROVIDER, type(e).__name__, e)
         return jsonify(error="AI API 호출에 실패했습니다. 잠시 후 다시 시도하세요."), 502
-    except (urllib.error.HTTPError, urllib.error.URLError, KeyError, json.JSONDecodeError) as e:
+    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, KeyError, json.JSONDecodeError) as e:
         log.warning("Canvas AI API 호출 실패: provider=%s %s: %s", PROVIDER, type(e).__name__, e)
         return jsonify(error="AI API 호출에 실패했습니다. 잠시 후 다시 시도하세요."), 502
 
