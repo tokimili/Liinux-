@@ -90,6 +90,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdn.jsdelivr.net/npm/fabric@5.3.1/dist/fabric.min.js"></script>
+<script src="{{ url_for('static', filename='js/vendor/fabric/fabric.min.js') }}"></script>
 <script src="{{ url_for('static', filename='js/canvas-studio.js') }}"></script>
 {% endblock %}
