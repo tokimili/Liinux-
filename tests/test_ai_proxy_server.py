@@ -7,9 +7,11 @@ ai-proxy — 실제 Claude/OpenAI 비전 API 호출을 전담하는 별도 Flask
 핵심 계약:
   - X-Internal-Token 이 없거나 틀리면 거부한다 (web 만 호출할 수 있어야 함).
   - provider/키가 서버(ai-proxy)에 설정되지 않으면 503.
-  - provider 에 따라 올바른 SDK(anthropic/openai)로 위임한다.
+  - provider 에 따라 올바른 SDK/REST 호출(anthropic/openai/gemini)로 위임한다.
 """
 from __future__ import annotations
+
+import json
 
 import pytest
 
@@ -165,6 +167,63 @@ def test_generate_upstream_error_returns_502(proxy_client, monkeypatch):
             self.messages = _FakeMessages()
 
     monkeypatch.setattr(ai_proxy_server.anthropic, "Anthropic", _FakeClient)
+
+    res = proxy_client.post(
+        "/generate",
+        json={"image": "data:image/png;base64,abc", "prompt": "test"},
+        headers=_auth_headers(),
+    )
+    assert res.status_code == 502
+
+
+class _FakeGeminiResponse:
+    def __init__(self, body: dict):
+        self._body = json.dumps(body).encode("utf-8")
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def test_generate_success_gemini(proxy_client, monkeypatch):
+    """gemini: 신용카드 없이 무료 API 키로 연동 테스트할 수 있는 provider."""
+    monkeypatch.setattr(ai_proxy_server, "PROVIDER", "gemini")
+    monkeypatch.setattr(ai_proxy_server, "API_KEY", "test-key")
+    captured = {}
+
+    def _fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["timeout"] = timeout
+        return _FakeGeminiResponse({
+            "candidates": [{"content": {"parts": [{"text": "# 제목\n\n본문"}]}}],
+        })
+
+    monkeypatch.setattr(ai_proxy_server.urllib.request, "urlopen", _fake_urlopen)
+
+    res = proxy_client.post(
+        "/generate",
+        json={"image": "data:image/png;base64,abc", "prompt": "요약해줘"},
+        headers=_auth_headers(),
+    )
+    assert res.status_code == 200
+    assert res.get_json()["markdown"] == "# 제목\n\n본문"
+    assert "gemini-2.0-flash" in captured["url"]
+    assert "test-key" in captured["url"]
+
+
+def test_generate_gemini_upstream_error_returns_502(proxy_client, monkeypatch):
+    monkeypatch.setattr(ai_proxy_server, "PROVIDER", "gemini")
+    monkeypatch.setattr(ai_proxy_server, "API_KEY", "test-key")
+
+    def _fake_urlopen(req, timeout=None):
+        raise ai_proxy_server.urllib.error.URLError("connection refused")
+
+    monkeypatch.setattr(ai_proxy_server.urllib.request, "urlopen", _fake_urlopen)
 
     res = proxy_client.post(
         "/generate",
