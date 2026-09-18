@@ -45,13 +45,15 @@ DEFAULT_PROMPT = (
 # gemini: Google AI Studio 에서 신용카드 없이 무료 API 키 발급 가능
 #   (https://aistudio.google.com/apikey). "-latest" 별칭을 쓴다 — Google이
 #   구체적 모델명(gemini-2.0-flash 등)을 자주 갈아치우는데, 이 별칭은 그때마다
-#   자동으로 최신 flash 모델을 가리켜서 코드를 매번 안 고쳐도 된다. 그래도
-#   별칭 자체가 없어지는 경우엔 CANVAS_AI_MODEL 에 직접 지정할 것
-#   (https://ai.google.dev/gemini-api/docs/models 에서 확인).
+#   자동으로 최신 모델을 가리켜서 코드를 매번 안 고쳐도 된다.
+#   flash-lite 를 쓰는 이유: 무료 티어에서 인기 있는 flash(-latest) 는
+#   "high demand" 503 이 잦았고, flash-lite 는 실측 1~2초로 훨씬 안정적이었다
+#   (요청량이 상대적으로 적어 덜 혼잡한 것으로 보인다). 그래도 상황이 바뀌면
+#   CANVAS_AI_MODEL 에 직접 지정할 것 (https://ai.google.dev/gemini-api/docs/models).
 _DEFAULT_MODELS = {
     "anthropic": "claude-haiku-4-5",
     "openai": "gpt-4o-mini",
-    "gemini": "gemini-flash-latest",
+    "gemini": "gemini-flash-lite-latest",
 }
 
 
