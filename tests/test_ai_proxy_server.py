@@ -231,3 +231,23 @@ def test_generate_gemini_upstream_error_returns_502(proxy_client, monkeypatch):
         headers=_auth_headers(),
     )
     assert res.status_code == 502
+
+
+def test_generate_gemini_timeout_returns_502(proxy_client, monkeypatch):
+    """urlopen 이 타임아웃되면 TimeoutError 를 던진다 — URLError 의 하위 클래스가
+    아니므로 별도로 잡아야 한다 (놓치면 500 이 되어 새고, nginx/Cloudflare 가
+    대신 HTML 에러 페이지를 반환하게 된다)."""
+    monkeypatch.setattr(ai_proxy_server, "PROVIDER", "gemini")
+    monkeypatch.setattr(ai_proxy_server, "API_KEY", "test-key")
+
+    def _fake_urlopen(req, timeout=None):
+        raise TimeoutError("The read operation timed out")
+
+    monkeypatch.setattr(ai_proxy_server.urllib.request, "urlopen", _fake_urlopen)
+
+    res = proxy_client.post(
+        "/generate",
+        json={"image": "data:image/png;base64,abc", "prompt": "test"},
+        headers=_auth_headers(),
+    )
+    assert res.status_code == 502
