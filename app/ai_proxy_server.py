@@ -43,13 +43,15 @@ DEFAULT_PROMPT = (
 
 # 비전 지원 모델 중 제공사별로 가장 저렴한(또는 무료) 기본값.
 # gemini: Google AI Studio 에서 신용카드 없이 무료 API 키 발급 가능
-#   (https://aistudio.google.com/apikey). 모델명이 자주 바뀌므로, 기본값이
-#   404 등으로 실패하면 CANVAS_AI_MODEL 에 최신 모델명을 직접 지정할 것
+#   (https://aistudio.google.com/apikey). "-latest" 별칭을 쓴다 — Google이
+#   구체적 모델명(gemini-2.0-flash 등)을 자주 갈아치우는데, 이 별칭은 그때마다
+#   자동으로 최신 flash 모델을 가리켜서 코드를 매번 안 고쳐도 된다. 그래도
+#   별칭 자체가 없어지는 경우엔 CANVAS_AI_MODEL 에 직접 지정할 것
 #   (https://ai.google.dev/gemini-api/docs/models 에서 확인).
 _DEFAULT_MODELS = {
     "anthropic": "claude-haiku-4-5",
     "openai": "gpt-4o-mini",
-    "gemini": "gemini-2.0-flash",
+    "gemini": "gemini-flash-latest",
 }
 
 
