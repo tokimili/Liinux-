@@ -1,0 +1,163 @@
+/* ==========================================================================
+   Canvas AI Studio — app.css 의 디자인 토큰을 그대로 재사용한다.
+   외부 폰트/CDN 스타일시트를 쓰지 않는다 (사이트 전체 CSP 정책과 일관성 유지).
+   ========================================================================== */
+
+#studio-shell {
+  display: grid;
+  grid-template-columns: 56px 1fr 300px;
+  grid-template-rows: 1fr auto;
+  grid-template-areas:
+    "toolbar canvas panel"
+    "status  status  status";
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  min-height: 640px;
+}
+
+/* ----------------------------------------------------------- 좌측 툴바 */
+.studio-toolbar {
+  grid-area: toolbar;
+  background: var(--panel);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 0;
+}
+.tool-btn {
+  width: 38px;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-dim);
+  border-radius: var(--radius-sm);
+  font-size: 1.05rem;
+  cursor: pointer;
+  line-height: 1;
+}
+.tool-btn:hover { background: var(--panel-2); color: var(--text); }
+.tool-btn.is-active { background: var(--accent); color: #fff; }
+.tool-btn-danger:hover { background: #3a161c; color: #ffc2c8; }
+.tool-sep { width: 60%; height: 1px; background: var(--border); margin: 4px 0; }
+
+/* ----------------------------------------------------------- 캔버스 영역 */
+.studio-canvas-area {
+  grid-area: canvas;
+  background: var(--bg-soft);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.canvas-top-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 14px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+.ctrl-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .78rem;
+  color: var(--text-dim);
+  margin: 0;
+}
+.ctrl-field input[type="color"] {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+.ctrl-field input[type="range"] { width: 80px; }
+.ctrl-field input[type="number"] { width: 60px; padding: 4px 6px; }
+.ctrl-count { margin-left: auto; font-size: .78rem; color: var(--text-mute); }
+
+.canvas-scroll {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.canvas-scroll canvas { box-shadow: var(--shadow); }
+
+/* ----------------------------------------------------------- 우측 패널 */
+.studio-right-panel {
+  grid-area: panel;
+  background: var(--bg-soft);
+  padding: 14px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+.studio-right-panel .panel { margin-bottom: 0; }
+.panel-title {
+  font-size: .82rem;
+  font-weight: 650;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  margin: 0 0 12px;
+}
+.output-section { display: flex; flex-direction: column; flex: 1; min-height: 220px; }
+.output-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+#md-output {
+  flex: 1;
+  min-height: 160px;
+  margin: 0;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+#md-output:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-mute);
+}
+
+/* ----------------------------------------------------------- 상태바 */
+.studio-status-bar {
+  grid-area: status;
+  background: var(--panel);
+  padding: 5px 14px;
+  font-size: .78rem;
+  color: var(--text-mute);
+  border-top: 1px solid var(--border);
+}
+.studio-status-bar.is-error { color: var(--danger); }
+.studio-status-bar.is-busy { color: var(--info); }
+.studio-status-bar.is-ok { color: var(--ok); }
+
+/* ----------------------------------------------------------- 모바일 */
+@media (max-width: 900px) {
+  #studio-shell {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto auto auto;
+    grid-template-areas:
+      "toolbar"
+      "canvas"
+      "panel"
+      "status";
+  }
+  .studio-toolbar { flex-direction: row; overflow-x: auto; width: 100%; }
+  .studio-right-panel { max-height: 420px; }
+}

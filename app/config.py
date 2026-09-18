@@ -70,6 +70,13 @@ class Config:
     GIT_COMMIT = os.environ.get("GIT_COMMIT", "unknown")
     DEPLOYED_AT = os.environ.get("DEPLOYED_AT", "")
 
+    # ---- Canvas AI Studio ----
+    # 클라이언트는 URL/토큰을 알 수 없다 — 서버가 자신의 키로만 호출한다.
+    # (브라우저에 토큰이 노출되면 누구나 이 키로 과금을 유발할 수 있다)
+    CANVAS_AI_API_URL = os.environ.get("CANVAS_AI_API_URL", "")
+    CANVAS_AI_API_KEY = os.environ.get("CANVAS_AI_API_KEY", "")
+    CANVAS_AI_TIMEOUT_SEC = _int("CANVAS_AI_TIMEOUT_SEC", 30)
+
     @property
     def is_vulnerable_mode(self) -> bool:
         return self.SECURITY_MODE == "vulnerable"

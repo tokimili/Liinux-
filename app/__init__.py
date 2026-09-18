@@ -58,6 +58,7 @@ def create_app(config=None) -> Flask:
     from app.blueprints.api import bp as api_bp
     from app.blueprints.auth import bp as auth_bp
     from app.blueprints.board import bp as board_bp
+    from app.blueprints.canvas_studio import bp as canvas_studio_bp
     from app.blueprints.main import bp as main_bp
 
     app.register_blueprint(main_bp)
@@ -65,6 +66,7 @@ def create_app(config=None) -> Flask:
     app.register_blueprint(board_bp, url_prefix="/board")
     app.register_blueprint(admin_bp, url_prefix="/admin")
     app.register_blueprint(api_bp, url_prefix="/api")
+    app.register_blueprint(canvas_studio_bp)
 
     # ---------------- 접속 로그 ----------------
     register_access_logging(app)
