@@ -63,7 +63,7 @@ scrypt 해싱 · 타이밍공격 대비 더미해시 · 브루트포스 잠금(I
 Fabric.js 캔버스에 구도를 그리면, 비전 AI가 분석해서 그림 생성 AI가 바로 실행할 수 있는 마크다운 작업 지시서를 만들어준다.
 - **`web` 컨테이너는 이 기능 때문에 인터넷에 열리지 않는다**: `web`은 원래부터 `backend`(internal) 네트워크에만 있어 인터넷에 못 나간다(DB 유출 방지). 실제 Claude/OpenAI 호출은 `frontend`+`backend` 양쪽에 연결된 별도 **`ai-proxy`** 컨테이너(`app/ai_proxy_server.py`)가 전담하고, `web`은 공유 비밀(`CANVAS_AI_PROXY_TOKEN`)로 내부망 너머 이 프록시만 호출한다. `web`이 침해당해도 AI 키·제공사 설정은 노출되지 않는다.
 - `ai-proxy`는 `web`과 이미지를 공유한다(별도 빌드 없음) — `docker-compose.yml`에서 `command:`만 바꿔 다른 진입점(`app.ai_proxy_server:app`)으로 띄운다.
-- 제공사는 코드 수정 없이 `.env`의 `CANVAS_AI_PROVIDER`(anthropic/openai/gemini)만 바꿔 전환한다. 모델도 비워두면 제공사별 최저가(또는 무료) 비전 모델(`claude-haiku-4-5` / `gpt-4o-mini` / `gemini-flash-latest`)을 자동으로 쓴다 — 토큰 비용 절감이 목적이라 기본값을 가장 싼 쪽으로 잡았다. `gemini`는 Google AI Studio에서 신용카드 없이 무료로 키를 발급받을 수 있어, 유료 크레딧 없이 연동을 테스트할 때 쓴다.
+- 제공사는 코드 수정 없이 `.env`의 `CANVAS_AI_PROVIDER`(anthropic/openai/gemini)만 바꿔 전환한다. 모델도 비워두면 제공사별 최저가(또는 무료) 비전 모델(`claude-haiku-4-5` / `gpt-4o-mini` / `gemini-flash-lite-latest`)을 자동으로 쓴다 — 토큰 비용 절감이 목적이라 기본값을 가장 싼 쪽으로 잡았다. `gemini`는 Google AI Studio에서 신용카드 없이 무료로 키를 발급받을 수 있어, 유료 크레딧 없이 연동을 테스트할 때 쓴다.
 - `/api/*`와 달리 CSRF 검사를 받는다 — 이 라우트는 외부 API 과금을 유발하는 상태 변경 요청이기 때문에 읽기전용 API의 CSRF 예외에서 의도적으로 제외했다.
 - Fabric.js는 CDN이 아니라 `app/static/js/vendor/`에 직접 내장한다 — 브라우저의 추적 방지/쿠키 차단 설정에 영향받지 않고, 사이트 전체의 "외부 의존 최소화" CSP 원칙과도 일치한다.
 - **배포 파이프라인은 `.env`를 매번 GitHub Secrets에서 통째로 재생성한다**(`.github/workflows/deploy.yml`). 그래서 `CANVAS_AI_PROXY_TOKEN`/`CANVAS_AI_PROVIDER`/`CANVAS_AI_MODEL`/`CANVAS_AI_API_KEY`도 **GitHub 저장소 Settings → Secrets and variables → Actions**에 등록해야 한다 — VM `.env`에만 수동으로 넣으면 다음 배포 때 조용히 사라진다.
