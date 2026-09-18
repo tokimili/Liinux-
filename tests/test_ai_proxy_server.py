@@ -212,7 +212,7 @@ def test_generate_success_gemini(proxy_client, monkeypatch):
     )
     assert res.status_code == 200
     assert res.get_json()["markdown"] == "# 제목\n\n본문"
-    assert "gemini-2.0-flash" in captured["url"]
+    assert "gemini-flash-latest" in captured["url"]
     assert "test-key" in captured["url"]
 
 
