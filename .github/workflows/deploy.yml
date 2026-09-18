@@ -116,6 +116,12 @@ jobs:
           DEPLOYED_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
           TUNNEL_TOKEN=${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+
+          CANVAS_AI_PROXY_TOKEN=${{ secrets.CANVAS_AI_PROXY_TOKEN }}
+          CANVAS_AI_PROVIDER=${{ secrets.CANVAS_AI_PROVIDER }}
+          CANVAS_AI_MODEL=${{ secrets.CANVAS_AI_MODEL }}
+          CANVAS_AI_API_KEY=${{ secrets.CANVAS_AI_API_KEY }}
+          CANVAS_AI_TIMEOUT_SEC=30
           EOF
           echo ".env 생성 완료 (권한: $(stat -c %a .env))"
 

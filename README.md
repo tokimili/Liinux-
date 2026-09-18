@@ -66,6 +66,7 @@ Fabric.js 캔버스에 구도를 그리면, 비전 AI가 분석해서 그림 생
 - 제공사는 코드 수정 없이 `.env`의 `CANVAS_AI_PROVIDER`(anthropic/openai/gemini)만 바꿔 전환한다. 모델도 비워두면 제공사별 최저가(또는 무료) 비전 모델(`claude-haiku-4-5` / `gpt-4o-mini` / `gemini-2.0-flash`)을 자동으로 쓴다 — 토큰 비용 절감이 목적이라 기본값을 가장 싼 쪽으로 잡았다. `gemini`는 Google AI Studio에서 신용카드 없이 무료로 키를 발급받을 수 있어, 유료 크레딧 없이 연동을 테스트할 때 쓴다.
 - `/api/*`와 달리 CSRF 검사를 받는다 — 이 라우트는 외부 API 과금을 유발하는 상태 변경 요청이기 때문에 읽기전용 API의 CSRF 예외에서 의도적으로 제외했다.
 - Fabric.js는 CDN이 아니라 `app/static/js/vendor/`에 직접 내장한다 — 브라우저의 추적 방지/쿠키 차단 설정에 영향받지 않고, 사이트 전체의 "외부 의존 최소화" CSP 원칙과도 일치한다.
+- **배포 파이프라인은 `.env`를 매번 GitHub Secrets에서 통째로 재생성한다**(`.github/workflows/deploy.yml`). 그래서 `CANVAS_AI_PROXY_TOKEN`/`CANVAS_AI_PROVIDER`/`CANVAS_AI_MODEL`/`CANVAS_AI_API_KEY`도 **GitHub 저장소 Settings → Secrets and variables → Actions**에 등록해야 한다 — VM `.env`에만 수동으로 넣으면 다음 배포 때 조용히 사라진다.
 
 ### 의도적 취약점 (vulnerable 모드)
 | ID | 취약점 | 위치 |
