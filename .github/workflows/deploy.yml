@@ -121,7 +121,7 @@ jobs:
           CANVAS_AI_PROVIDER=${{ secrets.CANVAS_AI_PROVIDER }}
           CANVAS_AI_MODEL=${{ secrets.CANVAS_AI_MODEL }}
           CANVAS_AI_API_KEY=${{ secrets.CANVAS_AI_API_KEY }}
-          CANVAS_AI_TIMEOUT_SEC=30
+          CANVAS_AI_TIMEOUT_SEC=45
           EOF
           echo ".env 생성 완료 (권한: $(stat -c %a .env))"
 
